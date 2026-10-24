@@ -2,7 +2,7 @@
 name = "gsq-rco-mlx"
 version = "0.1.0"
 requires-python = ">=3.12,<3.14"
-dependencies = ["numpy>=1.24", "tqdm>=4.60", "huggingface_hub>=0.23", "mlx>=0.20", "mlx-lm>=0.20"]
+dependencies = ["numpy>=1.24", "tqdm>=4.60", "huggingface_hub>=0.23", "mlx>=0.20", "mlx-lm>=0.20", "pyarrow>=14", "tokenizers>=0.15"]
 
 [tool.pytest.ini_options]
 testpaths = ["scripts", "src"]

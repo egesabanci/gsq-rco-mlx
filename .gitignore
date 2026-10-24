@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 .DS_Store
 models/
+data/
 *.safetensors
 results/.cal_cache/
 results/.eval_cache/

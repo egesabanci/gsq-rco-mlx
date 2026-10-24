@@ -12,3 +12,4 @@ results/.rco_db/
 results/.gsq_cache/
 results/runs/**/mlx/
 results/runs/**/*.npz
+*.egg-info/

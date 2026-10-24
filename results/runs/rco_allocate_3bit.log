@@ -1,0 +1,121 @@
+[allocate] 168 linears, options (2, 3, 4, 5, 6, 8), avg 3.0 bits, steps=100 g=8 lr=0.1 KL windows (16, 512) setup 2.9s
+[allocate] step   0 tau=1.0000 cost=9360.000000 loss=1.40078 28.9s
+[allocate] step   1 tau=0.9545 cost=9360.000000 loss=1.42692 26.9s
+[allocate] step   2 tau=0.9112 cost=9360.000000 loss=1.62819 28.3s
+[allocate] step   3 tau=0.8697 cost=9360.000000 loss=1.53308 27.0s
+[allocate] step   4 tau=0.8302 cost=9360.000000 loss=1.38502 26.1s
+[allocate] step   5 tau=0.7925 cost=9360.000000 loss=1.01313 26.1s
+[allocate] step   6 tau=0.7565 cost=9360.000000 loss=1.15421 25.4s
+[allocate] step   7 tau=0.7221 cost=9360.000000 loss=1.06856 26.1s
+[allocate] step   8 tau=0.6893 cost=9360.000000 loss=1.18671 29.0s
+[allocate] step   9 tau=0.6579 cost=9360.000000 loss=0.90728 26.1s
+[allocate] step  10 tau=0.6280 cost=9360.000000 loss=1.08231 26.2s
+[allocate] step  11 tau=0.5995 cost=9360.000000 loss=1.01115 25.9s
+[allocate] step  12 tau=0.5722 cost=9360.000000 loss=0.89168 25.7s
+[allocate] step  13 tau=0.5462 cost=9360.000000 loss=0.83695 26.2s
+[allocate] step  14 tau=0.5214 cost=9360.000000 loss=0.97025 26.0s
+[allocate] step  15 tau=0.4977 cost=9360.000000 loss=0.94747 25.8s
+[allocate] step  16 tau=0.4751 cost=9360.000000 loss=0.82841 25.6s
+[allocate] step  17 tau=0.4535 cost=9360.000000 loss=0.76531 25.7s
+[allocate] step  18 tau=0.4329 cost=9360.000000 loss=0.91342 27.2s
+[allocate] step  19 tau=0.4132 cost=9360.000000 loss=0.82311 26.2s
+[allocate] step  20 tau=0.3944 cost=9360.000000 loss=0.82609 27.6s
+[allocate] step  21 tau=0.3765 cost=9360.000000 loss=0.75865 26.8s
+[allocate] step  22 tau=0.3594 cost=9360.000000 loss=0.80803 26.2s
+[allocate] step  23 tau=0.3430 cost=9360.000000 loss=0.68529 25.9s
+[allocate] step  24 tau=0.3275 cost=9360.000000 loss=0.63366 30.0s
+[allocate] step  25 tau=0.3126 cost=9360.000000 loss=0.72302 27.1s
+[allocate] step  26 tau=0.2984 cost=9360.000000 loss=0.71614 27.1s
+[allocate] step  27 tau=0.2848 cost=9360.000000 loss=0.74006 27.4s
+[allocate] step  28 tau=0.2719 cost=9360.000000 loss=0.70277 32.7s
+[allocate] step  29 tau=0.2595 cost=9360.000000 loss=0.70149 31.9s
+[allocate] step  30 tau=0.2477 cost=9360.000000 loss=0.72492 30.3s
+[allocate] step  31 tau=0.2364 cost=9360.000000 loss=0.64531 27.3s
+[allocate] step  32 tau=0.2257 cost=9360.000000 loss=0.65242 26.9s
+[allocate] step  33 tau=0.2154 cost=9360.000000 loss=0.70479 27.4s
+[allocate] step  34 tau=0.2057 cost=9360.000000 loss=0.66287 27.0s
+[allocate] step  35 tau=0.1963 cost=9360.000000 loss=0.63481 26.4s
+[allocate] step  36 tau=0.1874 cost=9360.000000 loss=0.71607 26.0s
+[allocate] step  37 tau=0.1789 cost=9360.000000 loss=0.66058 26.6s
+[allocate] step  38 tau=0.1707 cost=9360.000000 loss=0.57492 26.4s
+[allocate] step  39 tau=0.1630 cost=9360.000000 loss=0.54112 26.1s
+[allocate] step  40 tau=0.1556 cost=9360.000000 loss=0.57559 26.4s
+[allocate] step  41 tau=0.1485 cost=9360.000000 loss=0.55058 27.1s
+[allocate] step  42 tau=0.1417 cost=9360.000000 loss=0.67915 27.2s
+[allocate] step  43 tau=0.1353 cost=9360.000000 loss=0.58853 28.5s
+[allocate] step  44 tau=0.1292 cost=9360.000000 loss=0.52920 28.1s
+[allocate] step  45 tau=0.1233 cost=9360.000000 loss=0.51998 30.8s
+[allocate] step  46 tau=0.1177 cost=9360.000000 loss=0.50263 28.0s
+[allocate] step  47 tau=0.1123 cost=9360.000000 loss=0.53519 26.1s
+[allocate] step  48 tau=0.1072 cost=9360.000000 loss=0.51460 26.0s
+[allocate] step  49 tau=0.1024 cost=9360.000000 loss=0.62565 27.4s
+[allocate] step  50 tau=0.0977 cost=9360.000000 loss=0.60294 27.2s
+[allocate] step  51 tau=0.0933 cost=9360.000000 loss=0.54474 27.9s
+[allocate] step  52 tau=0.0890 cost=9360.000000 loss=0.52893 29.3s
+[allocate] step  53 tau=0.0850 cost=9360.000000 loss=0.52114 30.3s
+[allocate] step  54 tau=0.0811 cost=9360.000000 loss=0.51697 26.5s
+[allocate] step  55 tau=0.0774 cost=9360.000000 loss=0.51141 27.9s
+[allocate] step  56 tau=0.0739 cost=9360.000000 loss=0.54661 27.2s
+[allocate] step  57 tau=0.0705 cost=9360.000000 loss=0.48790 27.0s
+[allocate] step  58 tau=0.0673 cost=9360.000000 loss=0.49379 26.3s
+[allocate] step  59 tau=0.0643 cost=9360.000000 loss=0.41511 27.2s
+[allocate] step  60 tau=0.0614 cost=9360.000000 loss=0.49341 27.7s
+[allocate] step  61 tau=0.0586 cost=9360.000000 loss=0.52460 26.4s
+[allocate] step  62 tau=0.0559 cost=9360.000000 loss=0.51779 25.8s
+[allocate] step  63 tau=0.0534 cost=9360.000000 loss=0.53450 25.7s
+[allocate] step  64 tau=0.0509 cost=9360.000000 loss=0.46205 25.9s
+[allocate] step  65 tau=0.0486 cost=9360.000000 loss=0.43240 25.7s
+[allocate] step  66 tau=0.0464 cost=9360.000000 loss=0.49820 25.7s
+[allocate] step  67 tau=0.0443 cost=9360.000000 loss=0.47196 25.7s
+[allocate] step  68 tau=0.0423 cost=9360.000000 loss=0.46684 25.7s
+[allocate] step  69 tau=0.0404 cost=9360.000000 loss=0.46344 25.9s
+[allocate] step  70 tau=0.0385 cost=9360.000000 loss=0.49807 25.7s
+[allocate] step  71 tau=0.0368 cost=9360.000000 loss=0.44562 25.7s
+[allocate] step  72 tau=0.0351 cost=9360.000000 loss=0.46855 25.8s
+[allocate] step  73 tau=0.0335 cost=9360.000000 loss=0.42605 26.1s
+[allocate] step  74 tau=0.0320 cost=9360.000000 loss=0.42787 25.9s
+[allocate] step  75 tau=0.0305 cost=9360.000000 loss=0.48083 25.6s
+[allocate] step  76 tau=0.0292 cost=9360.000000 loss=0.43328 25.8s
+[allocate] step  77 tau=0.0278 cost=9360.000000 loss=0.46632 152.5s
+[allocate] step  78 tau=0.0266 cost=9360.000000 loss=0.47875 51.6s
+[allocate] step  79 tau=0.0254 cost=9360.000000 loss=0.45127 26.0s
+[allocate] step  80 tau=0.0242 cost=9360.000000 loss=0.41241 25.8s
+[allocate] step  81 tau=0.0231 cost=9360.000000 loss=0.38998 26.4s
+[allocate] step  82 tau=0.0221 cost=9360.000000 loss=0.50409 25.8s
+[allocate] step  83 tau=0.0210 cost=9360.000000 loss=0.42982 25.7s
+[allocate] step  84 tau=0.0201 cost=9360.000000 loss=0.45765 25.9s
+[allocate] step  85 tau=0.0192 cost=9360.000000 loss=0.43138 25.6s
+[allocate] step  86 tau=0.0183 cost=9360.000000 loss=0.42264 25.8s
+[allocate] step  87 tau=0.0175 cost=9360.000000 loss=0.39072 25.6s
+[allocate] step  88 tau=0.0167 cost=9360.000000 loss=0.48225 25.9s
+[allocate] step  89 tau=0.0159 cost=9360.000000 loss=0.44343 25.7s
+[allocate] step  90 tau=0.0152 cost=9360.000000 loss=0.38245 25.7s
+[allocate] step  91 tau=0.0145 cost=9360.000000 loss=0.48661 25.9s
+[allocate] step  92 tau=0.0138 cost=9360.000000 loss=0.41660 25.7s
+[allocate] step  93 tau=0.0132 cost=9360.000000 loss=0.42070 25.9s
+[allocate] step  94 tau=0.0126 cost=9360.000000 loss=0.41115 25.7s
+[allocate] step  95 tau=0.0120 cost=9360.000000 loss=0.42867 25.8s
+[allocate] step  96 tau=0.0115 cost=9360.000000 loss=0.40346 25.6s
+[allocate] step  97 tau=0.0110 cost=9360.000000 loss=0.44801 25.8s
+[allocate] step  98 tau=0.0105 cost=9360.000000 loss=0.42158 25.7s
+[allocate] step  99 tau=0.0100 cost=9360.000000 loss=0.41210 25.7s
+[allocate] expected avg 3.000000 bits, decoded 9110/9360 -> 2.919872 code bits, 3.169872 bpp incl. scales
+[allocate] budget max|C-B|=9.75e-09 [PASS] decode [PASS] wrote /Users/egesabanci/Desktop/gsq-rco/results/rco_allocation.json total 2825.1s
+     2826.19 real       194.73 user       341.39 sys
+          1248690176  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              112946  page reclaims
+                 544  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+              100529  voluntary context switches
+             2178855  involuntary context switches
+       2713574340184  instructions retired
+       1801403667691  cycles elapsed
+          2504017744  peak memory footprint

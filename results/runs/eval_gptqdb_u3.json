@@ -1,0 +1,13 @@
+{
+ "mode": "uniform-3",
+ "ppl": 20.1354614672295,
+ "nll_per_token": 3.0024825127013055,
+ "n_tokens": 298862,
+ "n_windows": 146,
+ "seq_len": 2048,
+ "n_layers": 24,
+ "decoded_avg_bits": 3.0,
+ "decoded_int_cost": 9360,
+ "bpp_avg_incl_scales": 3.25,
+ "seconds": 124.17477607727051
+}

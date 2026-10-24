@@ -1,0 +1,43 @@
+  ppl: 10/146 windows
+  ppl: 20/146 windows
+  ppl: 30/146 windows
+  ppl: 40/146 windows
+  ppl: 50/146 windows
+  ppl: 60/146 windows
+  ppl: 70/146 windows
+  ppl: 80/146 windows
+  ppl: 90/146 windows
+  ppl: 100/146 windows
+  ppl: 110/146 windows
+  ppl: 120/146 windows
+  ppl: 130/146 windows
+  ppl: 140/146 windows
+{
+ "ppl": 63.529580117425056,
+ "nll_per_token": 4.151505626055044,
+ "n_tokens": 298862,
+ "n_windows": 146,
+ "seq_len": 2048,
+ "model": "results/runs/gsq_rco3/mlx",
+ "seconds": 124.01330828666687,
+ "file_bytes": 425446936,
+ "peak_mlx_gb": 1.1779059916734695
+}
+      125.16 real         1.93 user         4.14 sys
+           728940544  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               47604  page reclaims
+                1125  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                3252  voluntary context switches
+               39355  involuntary context switches
+         54965829522  instructions retired
+         19798975624  cycles elapsed
+          1724810824  peak memory footprint

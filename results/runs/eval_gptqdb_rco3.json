@@ -1,0 +1,13 @@
+{
+ "mode": "allocation:rco_allocation.json",
+ "ppl": 18.255403042077877,
+ "nll_per_token": 2.9044610933124027,
+ "n_tokens": 298862,
+ "n_windows": 146,
+ "seq_len": 2048,
+ "n_layers": 24,
+ "decoded_avg_bits": 2.9198717948717947,
+ "decoded_int_cost": 9110,
+ "bpp_avg_incl_scales": 3.1698717948717947,
+ "seconds": 139.9827630519867
+}

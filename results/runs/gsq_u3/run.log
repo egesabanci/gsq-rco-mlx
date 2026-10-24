@@ -1,0 +1,143 @@
+[heavy.sh] waited 1305s for the memory lock
+calibration (128, 512) from WikiText-2 train; layers [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]; bits [[3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3], [3]]
+layer 0: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 5.8713e-04 -> 5.1489e-04 (12.9s, 200 steps, median 62.9 ms/step)
+    stage vo: objective 1.0742e-06 -> 9.2524e-07 (76.0s, 200 steps, median 418.4 ms/step)
+    stage mlp: objective 8.6977e-04 -> 5.7380e-04 (246.0s, 200 steps, median 926.6 ms/step)
+layer 0: done in 334.9s, peak MLX 3.12 GB, max RSS 2.24 GB
+layer 1: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 5.9438e-03 -> 5.3372e-03 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.1910e-04 -> 9.3223e-05 (15.9s, 200 steps, median 70.6 ms/step)
+    stage mlp: objective 8.0407e-04 -> 6.3799e-04 (196.6s, 200 steps, median 924.5 ms/step)
+layer 1: done in 224.5s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 2: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.2509e-02 -> 1.1220e-02 (12.0s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 2.3288e-04 -> 2.0271e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 2.0164e-03 -> 1.3707e-03 (195.2s, 200 steps, median 922.3 ms/step)
+layer 2: done in 223.1s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 3: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.4161e-02 -> 1.2348e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.1342e-03 -> 4.2394e-04 (16.3s, 200 steps, median 70.9 ms/step)
+    stage mlp: objective 2.4822e-03 -> 4.2089e-03 (195.4s, 200 steps, median 922.6 ms/step)
+layer 3: done in 223.7s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 4: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 9.3305e-03 -> 8.3504e-03 (12.0s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.0055e-03 -> 5.1056e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 2.3986e-03 -> 1.8712e-03 (195.5s, 200 steps, median 922.7 ms/step)
+layer 4: done in 223.5s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 5: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.1626e-02 -> 1.0624e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.0939e-03 -> 5.6465e-04 (16.1s, 200 steps, median 70.6 ms/step)
+    stage mlp: objective 2.2379e-03 -> 2.0684e-03 (195.5s, 200 steps, median 922.5 ms/step)
+layer 5: done in 223.5s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 6: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.0018e-02 -> 9.2480e-03 (12.7s, 200 steps, median 62.4 ms/step)
+    stage vo: objective 1.9469e-03 -> 4.9690e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 2.2301e-03 -> 1.8744e-03 (195.7s, 200 steps, median 922.4 ms/step)
+layer 6: done in 224.3s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 7: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.4114e-02 -> 1.2642e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.2745e-03 -> 7.5505e-04 (15.9s, 200 steps, median 70.6 ms/step)
+    stage mlp: objective 2.4058e-03 -> 1.8679e-03 (195.3s, 200 steps, median 922.1 ms/step)
+layer 7: done in 223.2s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 8: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.0462e-02 -> 9.3929e-03 (12.1s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.2940e-03 -> 8.4120e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 2.0480e-03 -> 1.5457e-03 (195.8s, 200 steps, median 922.5 ms/step)
+layer 8: done in 223.8s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 9: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 2.1759e-02 -> 1.8321e-02 (12.0s, 200 steps, median 58.0 ms/step)
+    stage vo: objective 1.1876e-03 -> 7.2396e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 1.8599e-03 -> 1.4470e-03 (195.2s, 200 steps, median 921.3 ms/step)
+layer 9: done in 223.1s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 10: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 8.8834e-03 -> 7.8606e-03 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.2087e-03 -> 6.6177e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 1.6637e-03 -> 1.3452e-03 (197.9s, 200 steps, median 933.5 ms/step)
+layer 10: done in 225.8s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 11: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 2.4160e-02 -> 2.0529e-02 (12.1s, 200 steps, median 58.5 ms/step)
+    stage vo: objective 1.8115e-03 -> 6.8197e-04 (16.1s, 200 steps, median 71.1 ms/step)
+    stage mlp: objective 2.0320e-03 -> 1.5747e-03 (198.0s, 200 steps, median 932.2 ms/step)
+layer 11: done in 226.2s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 12: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 8.8788e-03 -> 8.0109e-03 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 9.3728e-04 -> 6.4704e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 1.8141e-03 -> 1.4510e-03 (195.4s, 200 steps, median 922.3 ms/step)
+layer 12: done in 223.3s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 13: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.5389e-02 -> 1.3385e-02 (12.0s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.3009e-03 -> 7.5201e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 2.1538e-03 -> 1.7096e-03 (195.6s, 200 steps, median 922.1 ms/step)
+layer 13: done in 223.6s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 14: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.1911e-02 -> 1.0750e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 2.2708e-03 -> 1.3617e-03 (16.1s, 200 steps, median 70.6 ms/step)
+    stage mlp: objective 3.2818e-03 -> 2.5748e-03 (197.6s, 200 steps, median 933.7 ms/step)
+layer 14: done in 225.6s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 15: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.1933e-02 -> 1.0880e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.4140e-03 -> 9.8761e-04 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 3.5947e-03 -> 2.9208e-03 (197.5s, 200 steps, median 931.0 ms/step)
+layer 15: done in 225.4s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 16: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 2.4073e-02 -> 2.1092e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 4.4948e-03 -> 1.6993e-03 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 7.1237e-03 -> 5.3524e-03 (195.3s, 200 steps, median 921.8 ms/step)
+layer 16: done in 223.2s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 17: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.5207e-02 -> 1.3746e-02 (12.1s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 2.5557e-03 -> 1.2504e-03 (16.0s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 5.5472e-03 -> 4.6914e-03 (195.5s, 200 steps, median 922.0 ms/step)
+layer 17: done in 223.5s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 18: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.5941e-02 -> 1.4616e-02 (12.0s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 3.1856e-03 -> 1.4936e-03 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 6.3855e-03 -> 5.4433e-03 (195.8s, 200 steps, median 922.8 ms/step)
+layer 18: done in 223.8s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 19: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.4482e-02 -> 1.2932e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 2.6346e-03 -> 1.6517e-03 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 1.1423e-02 -> 9.1280e-03 (196.0s, 200 steps, median 922.4 ms/step)
+layer 19: done in 223.9s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 20: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.9794e-02 -> 1.7781e-02 (12.0s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 7.4180e-03 -> 3.8850e-03 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 1.9193e-02 -> 1.7853e-02 (196.0s, 200 steps, median 923.3 ms/step)
+layer 20: done in 223.9s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 21: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 2.0157e-02 -> 1.7905e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 1.4181e-02 -> 6.2395e-03 (16.1s, 200 steps, median 70.6 ms/step)
+    stage mlp: objective 2.7486e-02 -> 2.6515e-02 (195.3s, 200 steps, median 921.6 ms/step)
+layer 21: done in 223.4s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 22: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 1.9896e-02 -> 1.7661e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 5.2566e-03 -> 4.5412e-03 (15.9s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 3.4088e-02 -> 3.1753e-02 (195.7s, 200 steps, median 922.1 ms/step)
+layer 22: done in 223.6s, peak MLX 3.12 GB, max RSS 2.49 GB
+layer 23: bits {'q_proj': 3, 'k_proj': 3, 'v_proj': 3, 'o_proj': 3, 'gate_proj': 3, 'up_proj': 3, 'down_proj': 3}
+    stage qk: objective 2.4737e-02 -> 2.2140e-02 (11.9s, 200 steps, median 57.9 ms/step)
+    stage vo: objective 8.0968e-03 -> 7.0901e-03 (16.1s, 200 steps, median 70.5 ms/step)
+    stage mlp: objective 5.9545e-02 -> 5.1369e-02 (195.6s, 200 steps, median 922.0 ms/step)
+layer 23: done in 223.7s, peak MLX 3.12 GB, max RSS 2.49 GB
+sanity ppl on 2x512 validation: FP 8.948 quantized 11.537
+exported 168 linears -> results/runs/gsq_u3/mlx: code 3.000 | native 3.250 | MLX 3.500 bits/weight
+wrote results/runs/gsq_u3/run_log.json in 92.6 min; max RSS 2.49 GB
+     6865.10 real       287.63 user       100.39 sys
+          2677833728  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+             4688794  page reclaims
+                2914  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+               10164  voluntary context switches
+             4045189  involuntary context switches
+       2560073457814  instructions retired
+       1074457100236  cycles elapsed
+          7348587496  peak memory footprint

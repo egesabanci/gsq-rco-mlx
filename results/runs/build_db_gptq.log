@@ -1,0 +1,69 @@
+[build-db] quantizer=gptq options=(2, 3, 4, 5, 6, 8) group=64 damp=0.01 layers=24 calibration=16x2048 (32752 Hessian rows) -> /Users/egesabanci/Desktop/gsq-rco/results/.rco_db
+[build-db] model opened lazily in 0.0s
+[build-db] layer  0 Hessians (32752 rows): MLX active 0.13 GB, cache 0.07 GB, peak 0.33 GB, max RSS 0.67 GB
+[build-db] layer  0 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.34 GB
+[build-db] layer  1 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.34 GB
+[build-db] layer  1 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  2 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  2 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  3 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  3 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  4 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  4 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  5 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  5 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  6 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  6 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  7 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  7 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  8 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  8 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  9 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer  9 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 10 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 10 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 11 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 11 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 12 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 12 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 13 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 13 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 14 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 14 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 15 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 15 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 16 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 16 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 17 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 17 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 18 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 18 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 19 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 19 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 20 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 20 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 21 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 21 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 22 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 22 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 23 Hessians (32752 rows): MLX active 0.15 GB, cache 0.07 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] layer 23 done (7 linears x 6 options): MLX active 0.12 GB, cache 0.00 GB, peak 0.33 GB, max RSS 1.35 GB
+[build-db] wrote /Users/egesabanci/Desktop/gsq-rco/results/.rco_db/manifest.json (168 linears) in 555.9s
+      556.70 real       537.16 user         3.42 sys
+          1351024640  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              378737  page reclaims
+                  43  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                1041  voluntary context switches
+               68519  involuntary context switches
+       5003023659359  instructions retired
+       1996398324472  cycles elapsed
+          1467696832  peak memory footprint

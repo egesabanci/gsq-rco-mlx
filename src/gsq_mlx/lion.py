@@ -1,12 +1,35 @@
 """Lion optimizer (paper uses Lion over AdamW, Tab.5: +3.7pts).
 
-MLX port: sign-momentum update; works on numpy arrays identically so we can
-test logic before mlx install./detach
-Update: m = b1*m + (1-b1)*g ; theta -= lr * sign(m + ... ) ; wd decoupled.
-Simplified faithful version: m = beta1*m + (1-beta1)*g; theta -= lr*(sign(m)+wd*theta)
+Update (Chen et al.; paper App G betas (0.9, 0.95), wd 1.0):
+    u = sign(beta1 * m + (1 - beta1) * g)
+    m <- beta2 * m + (1 - beta2) * g
+    theta <- theta - lr * (u + wd * theta)
+
+Paper App G learning rates: 1e-4 for discrete-assignment logits,
+2e-5 for per-group scales (Qwen Q2_K setting; Llama uses 5e-5 —
+see block_train.LR_SCALES). Dual backend: numpy dicts (tests) and
+mx arrays (device training) via the same call.
 """
 from __future__ import annotations
 import numpy as np
+
+try:
+    import mlx.core as mx  # type: ignore
+    _HAS_MLX = True
+except Exception:
+    mx = None  # type: ignore
+    _HAS_MLX = False
+
+# Paper App G / Tables 7-9.
+LR_LOGITS = 1e-4
+LR_SCALES_QWEN = 2e-5
+LR_SCALES_LLAMA = 5e-5
+WEIGHT_DECAY = 1.0
+BETAS = (0.9, 0.95)
+
+
+def _is_mx(x) -> bool:
+    return _HAS_MLX and isinstance(x, mx.array)
 
 
 class Lion:
@@ -16,14 +39,25 @@ class Lion:
         self.beta1 = beta1
         self.beta2 = beta2
         self.wd = wd
-        self.m = {k: np.zeros_like(v) for k, v in params.items()}
+        self.m = {}
+        for k, v in params.items():
+            if _is_mx(v):
+                self.m[k] = mx.zeros_like(v)
+            else:
+                self.m[k] = np.zeros_like(v)
 
     def step(self, params: dict[str, np.ndarray], grads: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         out = {}
         for k, v in params.items():
             g = grads[k]
-            m = self.beta1 * self.m[k] + (1 - self.beta1) * g
-            self.m[k] = self.beta2 * self.m[k] + (1 - self.beta2) * g
-            upd = np.sign(m) + self.wd * v
-            out[k] = (v - self.lr * upd).astype(v.dtype)
+            if _is_mx(v) or _is_mx(g) or _is_mx(self.m[k]):
+                m = self.beta1 * self.m[k] + (1 - self.beta1) * g
+                self.m[k] = self.beta2 * self.m[k] + (1 - self.beta2) * g
+                upd = mx.sign(m) + self.wd * v
+                out[k] = (v - self.lr * upd).astype(v.dtype)
+            else:
+                m = self.beta1 * self.m[k] + (1 - self.beta1) * g
+                self.m[k] = self.beta2 * self.m[k] + (1 - self.beta2) * g
+                upd = np.sign(m) + self.wd * np.asarray(v)
+                out[k] = (np.asarray(v) - self.lr * upd).astype(np.asarray(v).dtype)
         return out

@@ -14,10 +14,11 @@ the stored form.
 Every loss and Hessian skips sequence position 0. In layers 2, 3 and 21 position 0 carries 96-99.6%
 of the down_proj input energy (FINDINGS #10). Evaluation keeps it.
 
-8-bit linears are GPTQ-only (256 logits per weight are out of budget). Ternary (bits=1) uses mask and
-sign logits (Alg.2, alpha=3). 2-bit uses the full grid (Eq.5, alpha=6). 3..8-bit use the 5-logit
-local shift (Eq.6, alpha=6, mu=0). Table 7 gives std=0.01, lr 1e-4 (logits) and 5e-5 (scales),
-wd 1.0, betas (0.9, 0.95), tau 2 -> 0.05 and kappa 100 -> 500 over each stage (quant.gs_schedules).
+8-bit linears are GPTQ-only (256 logits per weight are out of budget): their codes and scales are
+frozen in the stage optimiser, while App H still fine-tunes 8-bit scales. Ternary (bits=1) uses mask
+and sign logits (Alg.2, alpha=3). 2-bit uses the full grid (Eq.5, alpha=6). 3..7-bit use the 5-logit
+local shift (Eq.6, alpha=6, mu=0). Table 7 gives std=0.01, lr 1e-4 (logits) and 5e-5 (scales), wd
+1.0, betas (0.9, 0.95), tau 2 -> 0.05 and kappa 100 -> 500 over each stage (quant.gs_schedules).
 
 Implementation notes (memory and speed, measured on layer 5):
   * tau and kappa are mx scalars, so the chunk functions take them as arrays. The gradient is
@@ -47,7 +48,7 @@ from .lion import BETAS, LR_LOGITS, LR_SCALES, WEIGHT_DECAY
 from .quant import get_grid, gs_schedules, local_shift_indices, local_shift_values
 
 ALPHA_TERNARY = 3.0   # Table 7, 1.58-bit
-ALPHA_SCALAR = 6.0    # Table 7, 2/3-bit; also the local shift for b > 2
+ALPHA_SCALAR = 6.0    # Table 7, 2/3-bit; also the local shift for 3..7 bits
 INIT_STD = 0.01       # Table 7, std
 CHUNK_ROWS = 1 << 20  # logit rows per checkpointed chunk
 
@@ -233,11 +234,12 @@ def _block_mse(stream, W, h, Y_fp):
 class _Linear:
     """One linear under the stage optimiser: GPTQ codes and scales, plus trainable logits.
 
-    Logits per weight are 2 (bits=2, full grid, Eq.5), 5 (bits>2, local shift, Eq.6) or two
+    Logits per weight are 2 (bits=2, full grid, Eq.5), 5 (bits 3..7, local shift, Eq.6) or two
     binary logits (bits=1, mask and sign, Alg.2). Group scales [out, G] enter through the group
-    index of every input column (``gid``). bits=8 has no logits (GPTQ only). The arrays of
-    self.P are plain keys ("logits", "lm", "lb", "scales"); during training they are prefixed
-    with the linear's name.
+    index of every input column (``gid``). bits=8 is GPTQ only: no logits, and in the stage optimiser
+    its codes and scales stay fixed, so its weight is the constant ``w8``. The arrays of self.P are
+    plain keys ("logits", "lm", "lb", "scales"); during training they are prefixed with the
+    linear's name.
     """
 
     def __init__(self, name, bits, codes, scales16, group_size, seed):
@@ -257,7 +259,11 @@ class _Linear:
         elif bits == 2:
             self.P["logits"] = mx.array(init_logits_2bit_from_codes(
                 codes, len(self.grid), alpha=ALPHA_SCALAR, std=INIT_STD, seed=seed))
-        elif bits > 2:
+        elif bits == 8:
+            # Dequantized GPTQ weight, scales[:, gid] * grid[codes] (the formula of gptq.dequantize).
+            self.w8 = mx.take(self.P["scales"], self.gid, axis=1) * mx.take(
+                self.grid_mx, mx.array(codes.astype(np.int32)), axis=0)
+        else:
             self.P["logits"] = mx.array(init_shift_logits(
                 d, alpha=ALPHA_SCALAR, std=INIT_STD, seed=seed))
             self.C = mx.array(local_shift_values(
@@ -270,7 +276,9 @@ class _Linear:
         """Soft weight w_bar = s * c in fp32 [out, in]. c is one Gumbel-Softmax sample of the grid
         value, built chunk by chunk (Alg.1: c = p @ grid; Eq.6 for shifts; Alg.2 for ternary,
         c = m * b). s is the group scale. ``key`` is split into one key per chunk; tau and kappa
-        are mx scalars."""
+        are mx scalars. bits=8 returns the fixed GPTQ weight and ignores P, key, tau and kappa."""
+        if self.bits == 8:
+            return self.w8
         d = self.shape[0] * self.shape[1]
         bounds = [(a, min(a + CHUNK_ROWS, d)) for a in range(0, d, CHUNK_ROWS)]
         keys = mx.random.split(key, len(bounds))
@@ -289,7 +297,8 @@ class _Linear:
         return mx.take(P[self.key("scales")], self.gid, axis=1) * c.reshape(self.shape)
 
     def hard_codes(self, P) -> np.ndarray:
-        """Argmax codes of the learned logits (Alg.2 line 11; Eq.6 shifts, clipped to the grid)."""
+        """Argmax codes of the learned logits (Alg.2 line 11; Eq.6 shifts, clipped to the grid).
+        bits=8: the GPTQ codes, frozen."""
         if self.bits == 8:
             return self.codes0
         if self.bits == 1:
@@ -349,7 +358,8 @@ def _train(lins, data_of, loss_of, n_seqs, opts, seed):
     gradients over ``resamples`` independent Gumbel draws, then takes one Lion step on the logits
     (lr_logits) and one on the scales (lr_scales). tau and kappa follow App G across the stage.
     loss_of(P, data, key, tau, kappa) gives the scalar soft loss. Writes the trained arrays back
-    into each _Linear.P and returns the soft loss of each step."""
+    into each _Linear.P and returns the soft loss of each step. bits=8 linears are not trained
+    (codes and scales frozen); a stage with no other linear runs no steps."""
     trainable = {lin.key(p): v for lin in lins if lin.bits != 8 for p, v in lin.P.items()}
     if not trainable or opts.steps == 0:
         return [], None
@@ -435,9 +445,9 @@ def quantize_block(stream: Qwen2Stream, h, W: dict, bits: dict, opts: BlockOpts,
             "soft_loss_last50": float(np.mean(hist[-50:])) if hist else None,
             "steps": len(hist), "median_step_ms": median_step_ms,
         }
+        timing = f"median {median_step_ms} ms/step" if hist else "no Lion steps"
         log(f"    stage {stage}: objective {obj0:.4e} -> {obj1:.4e} "
-            f"({stats['stages'][stage]['seconds']:.1f}s, {len(hist)} steps, "
-            f"median {median_step_ms} ms/step)")
+            f"({stats['stages'][stage]['seconds']:.1f}s, {len(hist)} steps, {timing})")
 
     # ---- qk: linear reconstruction, one loss per linear ----------------
     t0 = time.perf_counter()

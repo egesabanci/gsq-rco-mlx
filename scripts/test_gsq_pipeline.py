@@ -3,13 +3,15 @@
   A. toy blocks (random weights, no checkpoint): streaming Hessian equals gptq.hessian_from_inputs,
      the compiled Lion rule equals lion.Lion, Gumbel moments, stage losses use the FP targets and skip
      position 0, the stream applies each block once, every bit-width path (1, 2, 3, 8), the scale-only
-     fine-tune lowers the KL, and shard and allocation I/O round-trip
+     fine-tune lowers the KL (8-bit scales included), and shard and allocation I/O round-trip
   B. real Qwen2.5-0.5B layer 5 with 16 x 256 WikiText-2 tokens: at the default logit lr (1e-4), 100 of
      the 200 default steps lower every stage's hard objective below the GPTQ init, and resuming a 2-block
-     run from its first shard reproduces the second shard exactly
+     run from its first shard reproduces the second shard exactly. Layer 3 with the RCO allocation's
+     8-bit k_proj (the layer where the full run crashed), 3 steps on 4 x 128 tokens: 8-bit linears keep
+     their GPTQ codes and scales, also when q_proj is 8 bits too
 
-Usage: .venv/bin/python scripts/test_gsq_pipeline.py   (run it through heavy.sh: it loads layer 5;
-       < 3 min, < 2 GB). Exits nonzero on any failure.
+Usage: .venv/bin/python scripts/test_gsq_pipeline.py   (run it through heavy.sh: it loads layers 3
+       and 5; about 2.5 min, peak RSS 2.85 GiB). Exits nonzero on any failure.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ import numpy as np
 
 from gsq_mlx import staged
 from gsq_mlx.e2e import LIN_ORDER, LazyWeights, Qwen2Stream, rmsnorm
-from gsq_mlx.gptq import hessian_from_inputs, quantize_gptq
+from gsq_mlx.gptq import dequantize, hessian_from_inputs, quantize_gptq
 from gsq_mlx.lion import Lion
 from gsq_mlx.quant import get_grid
 
@@ -45,6 +47,27 @@ def check(name: str, cond: bool, detail: str = "") -> None:
     print(f"[{'PASS' if cond else 'FAIL'}] {name} {detail}", flush=True)
     if not cond:
         raise SystemExit(f"test_gsq_pipeline FAILED at {name}")
+
+
+def quantize_recording_inits(stream, h, W, bits, opts, layer):
+    """quantize_block, also returning each linear's GPTQ init (codes, fp16 scales) as _Linear got it."""
+    inits, orig_init = {}, staged._Linear.__init__
+
+    def record(self, name, b, codes, scales16, group_size, seed):
+        orig_init(self, name, b, codes, scales16, group_size, seed)
+        inits[name] = (codes.copy(), scales16.copy())
+
+    staged._Linear.__init__ = record
+    try:
+        shard, stats, _ = staged.quantize_block(stream, h, W, bits, opts, layer, log=quiet)
+    finally:
+        staged._Linear.__init__ = orig_init
+    return shard, stats, inits
+
+
+def at_gptq_init(shard, inits, names):
+    return all(shard[n]["codes"].dtype == np.uint8 and np.array_equal(shard[n]["codes"], inits[n][0])
+               and np.array_equal(shard[n]["scales"], inits[n][1]) for n in names)
 
 
 # ---------------------------------------------------------------- toy model ---
@@ -213,6 +236,22 @@ for b in (2, 3, 1, 8):
         check(f"A6 {b}-bit path: codes in range, stream equals stored form, objectives finite",
               codes_ok and same and finite, f"flip fraction sum {flips:.3f}")
 
+# an 8-bit linear has no logits, and its soft weight is the dequantized GPTQ weight, exactly
+g8 = quantize_gptq(np.asarray(Wt["q_proj"].astype(mx.float32)), np.eye(H), 8, GS, 0.01, 128)
+s8 = g8["scales"].astype(np.float16)
+lin8 = staged._Linear("q_proj", 8, g8["codes"], s8, GS, seed=7)
+w8_soft = np.asarray(lin8.soft({}, mx.random.key(1), mx.array(1.0), mx.array(100.0)))
+check("A6 8-bit linear: no logits, soft weight equals the dequantized GPTQ weight",
+      set(lin8.P) == {"scales"} and np.array_equal(w8_soft, dequantize(g8["codes"], s8.astype(np.float32), 8, GS)))
+
+# 8-bit k in qk, v in vo and gate in mlp, next to trained linears: every stage runs, the 8-bit ones
+# keep their GPTQ codes and scales
+mixed = dict(bits_all(2), k_proj=8, v_proj=8, gate_proj=8)
+sh_m, st_m, in_m = quantize_recording_inits(stream, h, Wt, mixed, opts_toy, layer=0)
+check("A6 8-bit k, v and gate in their stages: each stage trains its other linears, 8-bit at GPTQ",
+      at_gptq_init(sh_m, in_m, ["k_proj", "v_proj", "gate_proj"])
+      and all(st_m["stages"][s]["steps"] == 5 for s in ("qk", "vo", "mlp")))
+
 # shard I/O and allocation parsing
 with tempfile.TemporaryDirectory(prefix="wp5_test_") as tmp:
     fp = qq.fingerprint(qq.build_parser().parse_args(["--mode", "real", "--uniform-bits", "2"]))
@@ -258,6 +297,16 @@ moved = max(float(np.max(np.abs(scales[0][n].astype(np.float32)
                                 - shard0[n]["scales"].astype(np.float32)))) for n in LIN_ORDER)
 check("A8 scale-only fine-tune lowers the KL with codes fixed", last < first and moved > 0,
       f"KL {first:.5f} -> {last:.5f}, max scale move {moved:.2e}")
+# App H fine-tunes every scale, the 8-bit k_proj of block 1 included
+shard1k, _, _ = staged.quantize_block(stream, h1, W1, dict(bits_all(2), k_proj=8), opts_toy,
+                                      layer=1, log=quiet)
+sc_k, _ = staged.scale_finetune(stream, {0: shard0, 1: shard1k}, {0: base_of(Wt), 1: base_of(W1)},
+                                E, fnorm, tokens, h_ref, steps=10, lr=5e-5, group_size=GS, log=quiet)
+moved_k = {n: float(np.max(np.abs(sc_k[1][n].astype(np.float32)
+                                  - shard1k[n]["scales"].astype(np.float32)))) for n in LIN_ORDER}
+check("A8 App H: every linear's scales move, the 8-bit k_proj included",
+      min(moved_k.values()) > 0,
+      f"min move {min(moved_k.values()):.2e}, k_proj {moved_k['k_proj']:.2e}")
 
 # ------------------------------------------------------- B. real layer 5 ---
 from gsq_rco_common.data import calibration_windows  # noqa: E402  (data cache is local)
@@ -276,6 +325,26 @@ for s in ("qk", "vo", "mlp"):
 flips5 = sum(st5["linears"][n]["flip_frac"] for n in LIN_ORDER)
 check("B1 layer 5: codes changed by training", flips5 > 0,
       f"flip fraction per linear {[round(st5['linears'][n]['flip_frac'], 4) for n in LIN_ORDER]}")
+
+# layer 3 of the RCO allocation has an 8-bit k_proj in a mixed stage (where the full run crashed)
+W3 = qq.fp_block_weights(lw, 3)
+h3 = mx.stack([lw.load_rows("model.embed_tokens.weight", list(s))
+               for s in calibration_windows(4, 128, seed=0)])
+mx.eval(h3)
+opts3 = staged.BlockOpts(group_size=GS, steps=3, micro_batch=2, resamples=1)
+bits3 = {"q_proj": 4, "k_proj": 8, "v_proj": 6, "o_proj": 3, "gate_proj": 4, "up_proj": 3, "down_proj": 5}
+sh3, st3, inits3 = quantize_recording_inits(Qwen2Stream(), h3, W3, bits3, opts3, layer=3)
+check("B3 layer 3 with 8-bit k_proj: runs, k_proj keeps its GPTQ codes and scales",
+      at_gptq_init(sh3, inits3, ["k_proj"]) and st3["stages"]["qk"]["steps"] == 3
+      and st3["linears"]["k_proj"]["flip_frac"] == 0)
+sh4, st4, inits4 = quantize_recording_inits(Qwen2Stream(), h3, W3, dict(bits3, q_proj=8), opts3,
+                                            layer=3)
+qk4 = st4["stages"]["qk"]
+check("B3 q_proj and k_proj both 8 bits: qk runs no steps, keeps its objective, both at GPTQ",
+      at_gptq_init(sh4, inits4, ["q_proj", "k_proj"]) and qk4["steps"] == 0
+      and qk4["objective_final"] == qk4["objective_init"] and st4["stages"]["vo"]["steps"] == 3,
+      f"qk objective {qk4['objective_init']:.4e} -> {qk4['objective_final']:.4e}")
+del W3, h3, sh3, sh4
 
 with tempfile.TemporaryDirectory(prefix="wp5_resume_") as tmp:
     dirA, dirB = os.path.join(tmp, "A"), os.path.join(tmp, "B")

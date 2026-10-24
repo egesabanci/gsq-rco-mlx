@@ -19,6 +19,8 @@ frozen in the stage optimiser, while App H still fine-tunes 8-bit scales. Ternar
 and sign logits (Alg.2, alpha=3). 2-bit uses the full grid (Eq.5, alpha=6). 3..7-bit use the 5-logit
 local shift (Eq.6, alpha=6, mu=0). Table 7 gives std=0.01, lr 1e-4 (logits) and 5e-5 (scales), wd
 1.0, betas (0.9, 0.95), tau 2 -> 0.05 and kappa 100 -> 500 over each stage (quant.gs_schedules).
+Group scales of 4..7-bit linears are frozen as well (lion.scale_lr, WP5c: above 3 bits a scale step
+raised the stage objectives on real layer 3). App H still fine-tunes every scale.
 
 Implementation notes (memory and speed, measured on layer 5):
   * tau and kappa are mx scalars, so the chunk functions take them as arrays. The gradient is
@@ -44,7 +46,7 @@ from .block_train import STAGE_LAYERS, STAGES
 from .e2e import LIN_ORDER, Qwen2Stream, rmsnorm, silu
 from .gptq import (dequantize, init_logits_2bit_from_codes, init_shift_logits,
                    init_ternary_logits, quantize_gptq)
-from .lion import BETAS, LR_LOGITS, LR_SCALES, WEIGHT_DECAY
+from .lion import BETAS, LR_LOGITS, LR_SCALES, WEIGHT_DECAY, scale_lr
 from .quant import get_grid, gs_schedules, local_shift_indices, local_shift_values
 
 ALPHA_TERNARY = 3.0   # Table 7, 1.58-bit
@@ -356,15 +358,16 @@ def _loss_block(stream, W, lins, P, data, key, tau, kappa):
 def _train(lins, data_of, loss_of, n_seqs, opts, seed):
     """Stage optimiser (paper Sec 3.3). Each step samples micro_batch sequences, averages the
     gradients over ``resamples`` independent Gumbel draws, then takes one Lion step on the logits
-    (lr_logits) and one on the scales (lr_scales). tau and kappa follow App G across the stage.
+    (lr_logits) and one on the group scales (lion.scale_lr(lr_scales, bits): zero above 3 bits).
+    tau and kappa follow App G across the stage.
     loss_of(P, data, key, tau, kappa) gives the scalar soft loss. Writes the trained arrays back
     into each _Linear.P and returns the soft loss of each step. bits=8 linears are not trained
     (codes and scales frozen); a stage with no other linear runs no steps."""
     trainable = {lin.key(p): v for lin in lins if lin.bits != 8 for p, v in lin.P.items()}
     if not trainable or opts.steps == 0:
         return [], None
-    lr = {k: mx.array(opts.lr_scales if k.endswith(".scales") else opts.lr_logits)
-          for k in trainable}
+    lr = {lin.key(p): mx.array(scale_lr(opts.lr_scales, lin.bits) if p == "scales" else opts.lr_logits)
+          for lin in lins if lin.bits != 8 for p in lin.P}
     mom = {k: mx.zeros_like(v) for k, v in trainable.items()}
     R = opts.resamples
     update = mx.compile(_lion_update)

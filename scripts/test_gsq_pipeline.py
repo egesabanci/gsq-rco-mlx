@@ -3,15 +3,20 @@
   A. toy blocks (random weights, no checkpoint): streaming Hessian equals gptq.hessian_from_inputs,
      the compiled Lion rule equals lion.Lion, Gumbel moments, stage losses use the FP targets and skip
      position 0, the stream applies each block once, every bit-width path (1, 2, 3, 8), the scale-only
-     fine-tune lowers the KL (8-bit scales included), and shard and allocation I/O round-trip
+     fine-tune lowers the KL (8-bit scales included), shard and allocation I/O round-trip, the
+     local-shift soft weight equals the hard decode at a near-zero temperature (3, 5, 6 bits), and
+     scale_lr keeps lr_scales at 2 and 3 bits and freezes the group scales above 3 bits
   B. real Qwen2.5-0.5B layer 5 with 16 x 256 WikiText-2 tokens: at the default logit lr (1e-4), 100 of
      the 200 default steps lower every stage's hard objective below the GPTQ init, and resuming a 2-block
      run from its first shard reproduces the second shard exactly. Layer 3 with the RCO allocation's
      8-bit k_proj (the layer where the full run crashed), 3 steps on 4 x 128 tokens: 8-bit linears keep
-     their GPTQ codes and scales, also when q_proj is 8 bits too
+     their GPTQ codes and scales, also when q_proj is 8 bits too. B4: layer 3 with the RCO bits
+     (q4 k8 v6 o3 gate4 up3 down5) at 128 x 512 tokens, 200 steps, on the FP output of layers 0-2:
+     every stage's hard objective ends at or below its GPTQ init (HEAD's mlp stage rises here)
 
 Usage: .venv/bin/python scripts/test_gsq_pipeline.py   (run it through heavy.sh: it loads layers 3
-       and 5; about 2.5 min, peak RSS 2.85 GiB). Exits nonzero on any failure.
+       and 5; about 6.5 min, of which B4 is about 3.5 min; max RSS 2.80 GiB). Exits nonzero on any
+       failure.
 """
 from __future__ import annotations
 
@@ -31,7 +36,7 @@ import numpy as np
 from gsq_mlx import staged
 from gsq_mlx.e2e import LIN_ORDER, LazyWeights, Qwen2Stream, rmsnorm
 from gsq_mlx.gptq import dequantize, hessian_from_inputs, quantize_gptq
-from gsq_mlx.lion import Lion
+from gsq_mlx.lion import Lion, scale_lr
 from gsq_mlx.quant import get_grid
 
 T0 = time.time()
@@ -244,6 +249,27 @@ w8_soft = np.asarray(lin8.soft({}, mx.random.key(1), mx.array(1.0), mx.array(100
 check("A6 8-bit linear: no logits, soft weight equals the dequantized GPTQ weight",
       set(lin8.P) == {"scales"} and np.array_equal(w8_soft, dequantize(g8["codes"], s8.astype(np.float32), 8, GS)))
 
+# 3..7-bit local shift: at a near-zero temperature the soft weight is the hard decode, exactly, with
+# random logits (so codes move, and the grid ends clip). Own RNG: the draws above are unchanged.
+rng_ls = np.random.default_rng(3)
+for b in (3, 5, 6):
+    g = quantize_gptq(np.asarray(Wt["q_proj"].astype(mx.float32)), np.eye(H), b, GS, 0.01, 128)
+    s16 = g["scales"].astype(np.float16)
+    lin = staged._Linear("q_proj", b, g["codes"], s16, GS, seed=3)
+    Pl = {"scales": lin.P["scales"],
+          "logits": mx.array(rng_ls.standard_normal(lin.P["logits"].shape).astype(np.float32))}
+    soft_w = np.asarray(lin.soft({lin.key(p): v for p, v in Pl.items()}, mx.random.key(0),
+                                 mx.array(1e-3), mx.array(1e6)))
+    hard_codes = lin.hard_codes(Pl)
+    check(f"A9 {b}-bit local shift: soft weight at tau 1e-3 equals the hard decode",
+          np.array_equal(soft_w, dequantize(hard_codes, s16.astype(np.float32), b, GS)),
+          f"codes moved {np.mean(hard_codes != g['codes']):.2f}")
+
+# group-scale step of the stage optimiser (WP5c rule): 2 and 3 bits keep lr_scales, above 3 bits it is 0
+check("A10 scale_lr keeps lr_scales at 2 and 3 bits, freezes the group scales above 3 bits",
+      scale_lr(5e-5, 2) == 5e-5 and scale_lr(5e-5, 3) == 5e-5
+      and all(scale_lr(5e-5, b) == 0.0 for b in (4, 5, 6, 8)))
+
 # 8-bit k in qk, v in vo and gate in mlp, next to trained linears: every stage runs, the 8-bit ones
 # keep their GPTQ codes and scales
 mixed = dict(bits_all(2), k_proj=8, v_proj=8, gate_proj=8)
@@ -345,6 +371,27 @@ check("B3 q_proj and k_proj both 8 bits: qk runs no steps, keeps its objective, 
       and qk4["objective_final"] == qk4["objective_init"] and st4["stages"]["vo"]["steps"] == 3,
       f"qk objective {qk4['objective_init']:.4e} -> {qk4['objective_final']:.4e}")
 del W3, h3, sh3, sh4
+
+# B4: layer 3 with the RCO allocation's bits at the production calibration (128 x 512) and 200 steps,
+# on the FP output of layers 0-2 (the quantized prefix of the full run is not in the repo). On this
+# input HEAD's mlp stage rose 1.78e-3 -> 1.03e-2 (WP5c; the full run's quantized prefix gives
+# 2.47e-3 -> 9.82e-3). With the group scales above 3 bits frozen, every stage ends below its GPTQ init.
+h_b4 = mx.stack([lw.load_rows("model.embed_tokens.weight", list(s))
+                 for s in calibration_windows(128, 512, seed=0)])
+for i in range(3):
+    h_b4 = staged.advance(Qwen2Stream(), h_b4, qq.fp_block_weights(lw, i))
+mx.eval(h_b4)
+bits_rco3 = {"q_proj": 4, "k_proj": 8, "v_proj": 6, "o_proj": 3, "gate_proj": 4, "up_proj": 3,
+             "down_proj": 5}
+_, st_b4, _ = staged.quantize_block(Qwen2Stream(), h_b4, qq.fp_block_weights(lw, 3), bits_rco3,
+                                    staged.BlockOpts(group_size=GS, steps=200, micro_batch=2,
+                                                     resamples=2),
+                                    layer=3, log=lambda *a: print("   ", *a, flush=True))
+for s in ("qk", "vo", "mlp"):
+    o0, o1 = st_b4["stages"][s]["objective_init"], st_b4["stages"][s]["objective_final"]
+    check(f"B4 layer 3 RCO bits: {s} hard objective at or below GPTQ init", o1 <= o0,
+          f"{o0:.4e} -> {o1:.4e}")
+del h_b4
 
 with tempfile.TemporaryDirectory(prefix="wp5_resume_") as tmp:
     dirA, dirB = os.path.join(tmp, "A"), os.path.join(tmp, "B")

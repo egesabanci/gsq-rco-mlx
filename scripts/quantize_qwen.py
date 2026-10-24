@@ -1,28 +1,33 @@
-"""GSQ quantize + eval for Qwen2.5-0.5B (OWNED by GSQ side).
+"""GSQ quantize for Qwen2.5-0.5B (OWNED by GSQ side).
 
 Modes:
   synthetic (default, Phase-1 stub): shapes from config.json + synthetic
       weights only. Never touches model.safetensors.
       Usage: .venv/bin/python scripts/quantize_qwen.py [--bits 2]
-  real (Phase-2b end-to-end): streaming layer-by-layer quantize + eval on
-      the REAL checkpoint under a ~70MB ceiling. Weights are read
-      per-tensor via pread (never fully materialized); batch-1 forwards;
-      per-layer shard npz under results/.eval_cache (git-ignored);
-      final export results/qwen2.5-0.5b-gsq3bit.npz (git-ignored) and
-      results/gsq_eval.json.
+  real (block-wise staged GSQ, paper Sec 3.3 / 4.1 / App C, H): quantizes the
+      real checkpoint one Transformer block at a time (gsq_mlx.staged).
+      Calibration: WikiText-2 train windows (gsq_rco_common.data). Every block
+      is trained on the quantized prefix x_q against the FP block applied to
+      x_q, and then x_q <- Q_block(x_q), so each block is applied once per
+      stream. Outputs under --out (default results/.gsq_cache): one shard
+      layer_XX.npz per block (per linear codes uint8, scales fp16, bits; the
+      stats of the block as JSON), run_log.json, and the mlx-lm checkpoint in
+      <out>/mlx (gsq_mlx.export). --resume replays the quantized prefix from
+      the shards, so no block is skipped in the stream.
       Usage: .venv/bin/python scripts/quantize_qwen.py --mode real
-             [--layers 0-23] [--steps 20] [--resamples 2] [--resume]
+             --alloc results/rco_allocation.json [--layers 0-23] [--steps 200]
+             (or --uniform-bits 2) [--resume] [--scale-finetune-steps N]
 
 NEVER touches src/rco_mlx/* or scripts/allocate_qwen.py.
 """
 from __future__ import annotations
 import argparse
-import io
 import json
+import math
 import os
+import resource
 import sys
 import time
-import zipfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import numpy as np
@@ -32,11 +37,8 @@ ROOT = os.path.dirname(HERE)
 MODEL_DIR = os.path.join(ROOT, "models", "Qwen2.5-0.5B")
 CONFIG = os.path.join(MODEL_DIR, "config.json")
 SAFETENSORS = os.path.join(MODEL_DIR, "model.safetensors")
-ALLOC = os.path.join(ROOT, "results", "rco_allocation.json")
-EVAL_CACHE = os.path.join(ROOT, "results", ".eval_cache")
-FINAL_NPZ = os.path.join(ROOT, "results", "qwen2.5-0.5b-gsq3bit.npz")
-EVAL_JSON = os.path.join(ROOT, "results", "gsq_eval.json")
-PARAMS_PER_LAYER = 14909440
+OUT_DIR = os.path.join(ROOT, "results", ".gsq_cache")
+N_LAYERS = 24
 
 
 # ------------------------------------------------------------- synthetic ---
@@ -71,349 +73,291 @@ def parse_layers(s: str):
     return list(range(int(a), int(b) + 1))
 
 
-def build_seqs(n_cal=8, n_eval=4, seq_len=256):
-    from tokenizers import Tokenizer
-    tok = Tokenizer.from_file(os.path.join(MODEL_DIR, "tokenizer.json"))
-    bos = 151643
-    cal_ids = tok.encode(open(os.path.join(ROOT, "gsq.txt")).read()).ids
-    eva_ids = tok.encode(open(os.path.join(ROOT, "rco.txt")).read()).ids
-    cal = [np.array([bos] + cal_ids[i * (seq_len - 1):(i + 1) * (seq_len - 1)],
-                    dtype=np.int64) for i in range(n_cal)]
-    eva = [np.array([bos] + eva_ids[i * (seq_len - 1):(i + 1) * (seq_len - 1)],
-                    dtype=np.int64) for i in range(n_eval)]
-    assert all(len(s) == seq_len for s in cal + eva), "corpus too short?"
-    return cal, eva
-
-
-def run_real(args) -> None:
-    import mlx.core as mx
-    from gsq_mlx.e2e import (LazyWeights, Qwen2Stream, train_linear_mx,
-                             dequant_linear, seq_nll, rmsnorm,
-                             LIN_ORDER, WKEY, BKEY)
-    from gsq_mlx.quant import get_grid
-    t_all = time.time()
-    os.makedirs(EVAL_CACHE, exist_ok=True)
-    mx.random.seed(args.seed)
-
-    alloc = json.load(open(ALLOC))
-    per_layer_bits = {int(k): int(v) for k, v in alloc["per_layer_bits"].items()}
+def load_bits(args) -> dict:
+    """{layer: {linear: bits}} for the layers to quantize, from --alloc or --uniform-bits.
+    --alloc JSON: {"per_linear_bits": {"<layer>.<linear>": b}} or {"per_layer_bits": {"<layer>": b}}."""
+    from gsq_mlx.e2e import LIN_ORDER
     layers = parse_layers(args.layers)
-    assert set(layers) <= set(range(24)), "layers must be within 0-23"
-    os.makedirs(EVAL_CACHE, exist_ok=True)
-    print(f"allocation bits: {[per_layer_bits[i] for i in layers]}", flush=True)
-    print(f"expected_avg_bits={alloc['expected_avg_bits']:.4f}", flush=True)
-
-    N_CAL, N_EVAL, T = 8, 4, 256
-    cal, eva = build_seqs(N_CAL, N_EVAL, T)
-    VOCAB = 151936
-
-    lw = LazyWeights(SAFETENSORS)
-    # cache unique embedding rows once (one pread/row, ~10MB total)
-    uniq = sorted({int(x) for s in cal + eva for x in s})
-    t0 = time.time()
-    rows = lw.load_rows("model.embed_tokens.weight", uniq)
-    mx.eval(rows)
-    rowmap = dict(zip(uniq, [rows[i] for i in range(len(uniq))]))
-    print(f"embed cache: {len(uniq)} rows in {time.time()-t0:.1f}s", flush=True)
-
-    def embed_of(seq):
-        h = mx.stack([rowmap[int(x)] for x in seq])
-        mx.eval(h)
-        return h
-
-    qs = Qwen2Stream()
-    final_norm = lw.load("model.norm.weight")
-    mx.eval(final_norm)
-
-    def load_block_fp(i: int):
-        P = f"model.layers.{i}."
-        W = {}
-        for short in LIN_ORDER:
-            W[short] = lw.load(P + WKEY[short])
-        for short, full in BKEY.items():
-            W[short] = lw.load(P + full)
-        W["in_norm"] = lw.load(P + "input_layernorm.weight")
-        W["post_norm"] = lw.load(P + "post_attention_layernorm.weight")
-        mx.eval(*W.values())
-        return W
-
-    def shard_path(i: int):
-        return os.path.join(EVAL_CACHE, f"layer_{i:02d}.npz")
-
-    def ckpt_path(i: int | None = None):
-        if i is None:
-            return os.path.join(EVAL_CACHE, "hiddens_last.npz")
-        return os.path.join(EVAL_CACHE, f"hiddens_{i:02d}.npz")
-
-    # ---- FP perplexity on held-out eval seqs ---------------------------
-    fp_ppl, fp_nll_tok = None, None
-    if args.skip_fp and os.path.exists(EVAL_JSON):
-        try:
-            fp_ppl = json.load(open(EVAL_JSON)).get("fp_ppl")
-            print(f"reusing fp_ppl={fp_ppl} from {EVAL_JSON}", flush=True)
-        except Exception:
-            fp_ppl = None
-    if fp_ppl is None and not args.skip_fp:
-        t0 = time.time()
-        nll_sum, tok_sum = 0.0, 0
-        for s in eva:
-            h = embed_of(s)
-            for i in range(24):
-                W = load_block_fp(i)
-                h = qs.block(h, W)
-                mx.eval(h)
-                del W
-                mx.clear_cache()
-            h = rmsnorm(h, final_norm)
-            mx.eval(h)
-            nll, n = seq_nll(h, s, lambda ii: lw.load_rows(
-                "model.embed_tokens.weight", list(ii)), VOCAB,
-                get_range=lambda a, b: lw.load_range(
-                    "model.embed_tokens.weight", a, b))
-            nll_sum += nll * n
-            tok_sum += n
-            del h
-            mx.clear_cache()
-        fp_nll_tok = nll_sum / tok_sum
-        fp_ppl = float(np.exp(fp_nll_tok))
-        print(f"FP ppl={fp_ppl:.3f} (nll={fp_nll_tok:.4f}, "
-              f"{time.time()-t0:.1f}s)", flush=True)
-
-    # ---- streaming quantize --------------------------------------------
-    done = set()
-    hiddens = None
-    start_block = 0
-    if args.resume:
-        for i in layers:
-            if os.path.exists(shard_path(i)):
-                done.add(i)
-        todo = [i for i in layers if i not in done]
-        if todo:
-            start_block = min(todo)
-            ck = ckpt_path(start_block - 1) if start_block > 0 else None
-            if ck is not None and os.path.exists(ck):
-                z = np.load(ck)
-                hiddens = {k: mx.array(z[k]).astype(mx.bfloat16)
-                           for k in z.files}
-                print(f"resume: {len(done)} shards, hiddens @ block "
-                      f"{start_block - 1} -> starting at {start_block}",
-                      flush=True)
-            else:
-                done = set()  # checkpoint missing: redo from scratch
-                start_block = 0
-                print("resume: ckpt missing, restarting", flush=True)
-
-    t0 = time.time()
-    q_times, hard_mse_log = {}, {}
-    if hiddens is None:
-        hiddens = {}
-        for s_i, s in enumerate(cal):
-            hiddens[f"cal{s_i}"] = embed_of(s)
-        for s_i, s in enumerate(eva):
-            hiddens[f"eva{s_i}"] = embed_of(s)
-    cal_keys = [f"cal{s_i}" for s_i in range(N_CAL)]
-    eva_keys = [f"eva{s_i}" for s_i in range(N_EVAL)]
-
-    N_LAYERS_TOTAL = 24
-    for i in range(start_block, N_LAYERS_TOTAL):
-        if i in done:
-            continue
-        quantize_this = i in layers
-        bits = per_layer_bits[i]
-        Wfp = load_block_fp(i)
-        # FP block forward; capture subsampled linear inputs for cal seqs
-        caps = {name: [] for name in LIN_ORDER}
-        for s_i, key in enumerate(cal_keys):
-            h = hiddens[key]
-            if quantize_this:
-                out, cap = qs.block(h, Wfp, capture=True)
-                mx.eval(out, *cap.values())
-                for name in LIN_ORDER:
-                    c = cap[name][::4]  # 64 toks/seq -> 512 total
-                    mx.eval(c)
-                    caps[name].append(c)
-                del cap
-            else:
-                out = qs.block(h, Wfp)
-                mx.eval(out)
-            hiddens[key] = out
-            del h
-        for key in eva_keys:  # eval seqs ride along, no capture
-            h = qs.block(hiddens[key], Wfp)
-            mx.eval(h)
-            hiddens[key] = h
-        del Wfp
-        mx.clear_cache()
-
-        if quantize_this:
-            grid = get_grid(bits)
-            tB = time.time()
-            Xstack = {n: mx.concatenate(caps[n], axis=0) for n in LIN_ORDER}
-            mx.eval(*Xstack.values())
-            del caps
-            mx.clear_cache()
-            shard = {"bits": np.array(bits), "grid": np.asarray(
-                grid, dtype=np.float32)}
-            for li, name in enumerate(LIN_ORDER):  # qk -> vo -> mlp order
-                Wone = load_block_fp_single(lw, i, name)
-                codes, scales, info = train_linear_mx(
-                    [Xstack[name]], Wone, bits, args.steps,
-                    args.resamples, seed=args.seed * 1000 + i * 10 + li)
-                shard[f"{name}.codes"] = codes
-                shard[f"{name}.scales"] = np.asarray(scales, dtype=np.float16)
-                hard_mse_log[f"{i}.{name}"] = info.get("hard_mse", 0.0)
-                del Wone
-                mx.clear_cache()
-            np.savez_compressed(shard_path(i), **shard)
-            # re-forward through quantized block (frozen prefix for next)
-            Wq = load_block_quant(shard, i, lw)
-            for key in cal_keys + eva_keys:
-                h = qs.block(hiddens[key], Wq)
-                mx.eval(h)
-                hiddens[key] = h
-            del Wq, Xstack
-            mx.clear_cache()
-            q_times[i] = time.time() - tB
-            done.add(i)
-            print(f"layer {i} bits={bits} "
-                  f"{q_times[i]:.1f}s mse={hard_mse_log.get(f'{i}.down_proj', 0):.5f}",
-                  flush=True)
-            per_layer = sum(q_times.values()) / max(1, len(q_times))
-            print(f"  ETA remaining quant: "
-                  f"{per_layer * (len(layers) - len(done)) / 60:.1f} min",
-                  flush=True)
-        # checkpoint hiddens every block (fp16, ~5MB, git-ignored dir)
-        ck = {}
-        for k, v in hiddens.items():
-            ck[k] = np.asarray(v.astype(mx.float16))
-        np.savez_compressed(ckpt_path(i), **ck)
-        np.savez_compressed(ckpt_path(), **ck)
-        del ck
-        mx.clear_cache()
-
-    quant_s = time.time() - t0
-
-    # ---- quantized/hybrid perplexity ------------------------------------
-    t0 = time.time()
-    nll_sum, tok_sum = 0.0, 0
-    for s_i, key in enumerate(eva_keys):
-        h = rmsnorm(hiddens[key], final_norm)
-        mx.eval(h)
-        nll, n = seq_nll(h, eva[s_i], lambda ii: lw.load_rows(
-            "model.embed_tokens.weight", list(ii)), VOCAB,
-            get_range=lambda a, b: lw.load_range(
-                "model.embed_tokens.weight", a, b))
-        nll_sum += nll * n
-        tok_sum += n
-    quant_nll_tok = nll_sum / tok_sum
-    quant_ppl = float(np.exp(quant_nll_tok))
-    eval_s = time.time() - t0
-    print(f"QUANT ppl={quant_ppl:.3f} (nll={quant_nll_tok:.4f}, "
-          f"{eval_s:.1f}s)", flush=True)
-
-    # ---- export ----------------------------------------------------------
-    t0 = time.time()
-    avg_bits = float(np.mean([per_layer_bits[i] for i in sorted(done)]))
-    alloc_match = all(per_layer_bits[i] == alloc["per_layer_bits"][str(i)]
-                      for i in sorted(done))
-    with zipfile.ZipFile(FINAL_NPZ, "w", compression=zipfile.ZIP_STORED) as z:
-        manifest = {"model": "Qwen2.5-0.5B", "group_size": 64,
-                    "per_layer_bits": {str(i): per_layer_bits[i]
-                                       for i in sorted(done)},
-                    "grids": {}, "format": "uint8 codes + fp16 per-group "
-                    "scales, row-major groups of 64 over input dim"}
-        for i in sorted(done):
-            sh = np.load(shard_path(i))
-            manifest["grids"][str(i)] = [float(x) for x in sh["grid"]]
-            for name in LIN_ORDER:
-                for suf in ("codes", "scales"):
-                    arr = sh[f"{name}.{suf}"]
-                    buf = io.BytesIO()
-                    np.lib.format.write_array(buf, np.ascontiguousarray(arr))
-                    z.writestr(f"layer{i}.{name}.{suf}.npy", buf.getvalue())
-        z.writestr("manifest.json", json.dumps(manifest, indent=1))
-    export_s = time.time() - t0
-
-    total_s = time.time() - t_all
-    partial = sorted(done) != list(range(24))
-    remaining = [i for i in range(24) if i not in done]
-    eta_s = (sum(q_times.values()) / max(1, len(q_times)) * len(remaining)
-             if remaining else 0.0)
-    out = {
-        "fp_ppl": fp_ppl,
-        "quant_ppl": quant_ppl,
-        "delta_ppl": (quant_ppl - fp_ppl) if fp_ppl else None,
-        "avg_bits": avg_bits,
-        "expected_avg_bits": alloc["expected_avg_bits"],
-        "allocation_match": bool(alloc_match),
-        "per_layer_bits": {str(i): per_layer_bits[i] for i in sorted(done)},
-        "layers_done": sorted(done),
-        "partial": partial,
-        "eta_remaining_s": eta_s,
-        "runtime_s": {"total": total_s, "quantize": quant_s, "eval": eval_s,
-                      "export": export_s, "per_layer": q_times},
-        "config": {"steps": args.steps, "resamples": args.resamples,
-                   "seed": args.seed, "group_size": 64, "max_tokens": 512,
-                   "cal": f"{N_CAL}x{T} gsq.txt", "eval": f"{N_EVAL}x{T} rco.txt",
-                   "compute": "bf16 fwd / fp32 Lion, batch-1, streamed"},
-        "hard_mse": hard_mse_log,
-        "honesty_note": ("SMOKE-SCALE, not paper-scale: 8x256 cal + 4x256 "
-                         "held-out eval tokens (paper: 4096x4096), 20-50 Lion "
-                         "steps/linear with 2-4 Gumbel resamples (paper: 20 "
-                         "epochs), per-linear reconstruction losses in "
-                         "qk->vo->mlp stage order (paper's joint "
-                         "attention/block losses deferred), group_size 64 "
-                         "(paper 128), norms/embeddings/biases kept fp."),
-    }
-    json.dump(out, open(EVAL_JSON, "w"), indent=1)
-    print(f"wrote {EVAL_JSON} + {FINAL_NPZ} ({os.path.getsize(FINAL_NPZ)/1e6:.0f}MB)",
-          flush=True)
-    print(f"FP ppl={fp_ppl} QUANT ppl={quant_ppl} "
-          f"delta={out['delta_ppl']} avg_bits={avg_bits:.3f} "
-          f"total={total_s/60:.1f}min partial={partial}", flush=True)
+    if (args.alloc is None) == (args.uniform_bits is None):
+        raise SystemExit("give exactly one of --alloc and --uniform-bits")
+    if args.uniform_bits is not None:
+        per = {(i, n): args.uniform_bits for i in layers for n in LIN_ORDER}
+    else:
+        alloc = json.load(open(args.alloc))
+        if "per_linear_bits" in alloc:
+            per = {}
+            for key, b in alloc["per_linear_bits"].items():
+                i, name = key.split(".", 1)
+                per[(int(i), name)] = int(b)
+        elif "per_layer_bits" in alloc:
+            per = {(i, n): int(alloc["per_layer_bits"][str(i)]) for i in layers for n in LIN_ORDER}
+        else:
+            raise SystemExit(f"{args.alloc}: needs per_linear_bits or per_layer_bits")
+    out = {}
+    for i in layers:
+        missing = [n for n in LIN_ORDER if (i, n) not in per]
+        if missing:
+            raise SystemExit(f"layer {i} has no bits for {missing}")
+        out[i] = {n: per[(i, n)] for n in LIN_ORDER}
+        for n, b in out[i].items():
+            if not 1 <= b <= 8:
+                raise SystemExit(f"layer {i} {n}: bits {b} outside 1..8")
+    return out
 
 
-def load_block_fp_single(lw, i: int, name: str):
-    from gsq_mlx.e2e import WKEY
+def fingerprint(args) -> dict:
+    """Settings that must match for shards to be reused on resume."""
+    from gsq_mlx.lion import LR_SCALES
+    return {"model": "Qwen2.5-0.5B", "group_size": args.group_size, "damp": args.damp,
+            "block_size": 128, "steps": args.steps, "micro_batch": args.micro_batch,
+            "resamples": args.resamples, "lr_logits": args.lr_logits, "lr_scales": LR_SCALES,
+            "seed": args.seed, "n_cal": args.n_cal, "seq_len": args.seq_len,
+            "cal_seed": args.cal_seed}
+
+
+def fp_block_weights(lw, i: int) -> dict:
+    """FP weights of block i (linears, q/k/v biases, norms), bf16."""
     import mlx.core as mx
-    w = lw.load(f"model.layers.{i}." + WKEY[name])
-    mx.eval(w)
-    return w
-
-
-def load_block_quant(shard: dict, i: int, lw):
-    """Dequant one block from a shard dict (+fp biases/norms)."""
-    import mlx.core as mx
-    from gsq_mlx.e2e import dequant_linear, WKEY, BKEY
-    import numpy as np
-    grid = np.asarray(shard["grid"], dtype=np.float32)
-    W = {}
-    for short in ("q_proj", "k_proj", "v_proj", "o_proj",
-                  "gate_proj", "up_proj", "down_proj"):
-        W[short] = dequant_linear(shard[f"{short}.codes"],
-                                  shard[f"{short}.scales"], grid)
-    for short, full in BKEY.items():
-        W[short] = lw.load(f"model.layers.{i}." + full)
-    W["in_norm"] = lw.load(f"model.layers.{i}.input_layernorm.weight")
-    W["post_norm"] = lw.load(f"model.layers.{i}.post_attention_layernorm.weight")
+    from gsq_mlx.e2e import BKEY, WKEY
+    P = f"model.layers.{i}."
+    W = {short: lw.load(P + full) for short, full in WKEY.items()}
+    W.update({short: lw.load(P + full) for short, full in BKEY.items()})
+    W["in_norm"] = lw.load(P + "input_layernorm.weight")
+    W["post_norm"] = lw.load(P + "post_attention_layernorm.weight")
     mx.eval(*W.values())
     return W
 
 
-def main() -> None:
+def save_shard(path: str, layer: int, lins: dict, bits: dict, fp: dict, stats: dict) -> None:
+    arrays = {"meta": np.array(json.dumps({"layer": layer, "fingerprint": fp,
+                                           "bits": bits})),
+              "stats": np.array(json.dumps(stats))}
+    for name, q in lins.items():
+        arrays[f"{name}.codes"] = q["codes"]
+        arrays[f"{name}.scales"] = q["scales"]
+        arrays[f"{name}.bits"] = np.array(q["bits"])
+    tmp = path + ".tmp.npz"
+    np.savez_compressed(tmp, **arrays)
+    os.replace(tmp, path)
+
+
+def load_shard(path: str):
+    """-> (meta dict, stats dict, {linear: {codes, scales, bits}}), fully read into memory."""
+    from gsq_mlx.e2e import LIN_ORDER
+    with np.load(path) as z:
+        meta = json.loads(str(z["meta"]))
+        stats = json.loads(str(z["stats"]))
+        lins = {n: {"codes": z[f"{n}.codes"], "scales": z[f"{n}.scales"],
+                    "bits": int(z[f"{n}.bits"])} for n in LIN_ORDER}
+    return meta, stats, lins
+
+
+def _check_meta(meta: dict, fp: dict, bits: dict, path: str) -> None:
+    if meta["fingerprint"] != fp or {k: int(v) for k, v in meta["bits"].items()} != bits:
+        raise SystemExit(f"{path} was made with other settings; delete it or change the arguments")
+
+
+def run_real(args) -> None:
+    import mlx.core as mx
+    from gsq_rco_common.data import calibration_windows, eval_windows
+    from gsq_rco_common.evaluate import nll_from_hidden
+    from gsq_mlx import staged
+    from gsq_mlx.e2e import BKEY, LIN_ORDER, WKEY, LazyWeights, Qwen2Stream, rmsnorm
+    from gsq_mlx.export import bits_report, export_mlx_lm
+    from gsq_mlx.lion import LR_SCALES
+
+    t_all = time.perf_counter()
+    os.makedirs(args.out, exist_ok=True)
+    bits_by_layer = load_bits(args)
+    layers = sorted(bits_by_layer)
+    fp = fingerprint(args)
+    opts = staged.BlockOpts(group_size=args.group_size, damp=args.damp, steps=args.steps,
+                            micro_batch=args.micro_batch, resamples=args.resamples,
+                            lr_logits=args.lr_logits, seed=args.seed)
+    shard_path = lambda i: os.path.join(args.out, f"layer_{i:02d}.npz")
+    done = {i for i in layers if os.path.exists(shard_path(i))}
+    if done and not args.resume:
+        raise SystemExit(f"{len(done)} shard(s) already in {args.out}: pass --resume to reuse them")
+    for i in sorted(done):
+        _check_meta(load_shard(shard_path(i))[0], fp, bits_by_layer[i], shard_path(i))
+
+    cal = calibration_windows(args.n_cal, args.seq_len, seed=args.cal_seed)   # int32 [N, T]
+    lw = LazyWeights(SAFETENSORS)
+    stream = Qwen2Stream()
+    h = mx.stack([lw.load_rows("model.embed_tokens.weight", list(s)) for s in cal])
+    mx.eval(h)
+    print(f"calibration {cal.shape} from WikiText-2 train; layers {layers}; "
+          f"bits {[sorted(set(bits_by_layer[i].values())) for i in layers]}", flush=True)
+
+    # ---- quantize block by block on the quantized prefix ----------------
+    layer_stats = {}
+    for i in range(N_LAYERS):
+        t0 = time.perf_counter()
+        Wfp = fp_block_weights(lw, i)
+        if i not in bits_by_layer:
+            Wq = Wfp                                   # not quantized: FP block in the stream
+        elif i in done:
+            meta, stats, lins = load_shard(shard_path(i))
+            Wq = staged.hard_block(lins, {k: Wfp[k] for k in Wfp if k not in LIN_ORDER},
+                                   args.group_size)
+            layer_stats[i] = stats
+            print(f"layer {i}: replayed from {shard_path(i)}", flush=True)
+        else:
+            print(f"layer {i}: bits {bits_by_layer[i]}", flush=True)
+            shard, stats, Wq = staged.quantize_block(stream, h, Wfp, bits_by_layer[i], opts, i)
+            stats["seconds"] = round(time.perf_counter() - t0, 2)
+            save_shard(shard_path(i), i, shard, bits_by_layer[i], fp, stats)
+            layer_stats[i] = stats
+            print(f"layer {i}: done in {stats['seconds']:.1f}s, peak MLX "
+                  f"{stats['peak_mlx_bytes'] / 2**30:.2f} GB, max RSS "
+                  f"{resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**30:.2f} GB",
+                  flush=True)
+        h = staged.advance(stream, h, Wq)
+        del Wfp, Wq
+        mx.clear_cache()
+    del h
+    mx.clear_cache()
+
+    # ---- optional scale-only end-to-end fine-tune (App H) ---------------
+    fine = None
+    if args.scale_finetune_steps > 0:
+        t0 = time.perf_counter()
+        E = lw.load("model.embed_tokens.weight")
+        fnorm = lw.load("model.norm.weight")
+        hf = mx.stack([lw.load_rows("model.embed_tokens.weight", list(s)) for s in cal])
+        for i in range(N_LAYERS):
+            hf = staged.advance(stream, hf, fp_block_weights(lw, i))
+        h_ref = rmsnorm(hf, fnorm)
+        mx.eval(h_ref)
+        del hf
+        qblocks, base = {}, {}
+        for i in range(N_LAYERS):
+            Wfp = fp_block_weights(lw, i)
+            if i in bits_by_layer:
+                _, _, lins = load_shard(shard_path(i))
+                qblocks[i] = lins
+                base[i] = {k: Wfp[k] for k in Wfp if k not in LIN_ORDER}
+            else:
+                base[i] = Wfp
+        new, kls = staged.scale_finetune(stream, qblocks, base, E, fnorm, cal, h_ref,
+                                         args.scale_finetune_steps, LR_SCALES,
+                                         args.group_size)
+        w = max(1, min(10, len(kls) // 2))  # averaging window: at most half the steps
+        for i in layers:
+            meta, stats, lins = load_shard(shard_path(i))
+            for n in LIN_ORDER:
+                lins[n]["scales"] = new[i][n]
+            stats["scale_finetune"] = {"steps": args.scale_finetune_steps, "window": w,
+                                       "kl_first": float(np.mean(kls[:w])),
+                                       "kl_last": float(np.mean(kls[-w:]))}
+            save_shard(shard_path(i), i, lins, bits_by_layer[i], fp, stats)
+            layer_stats[i] = stats
+        fine = {"steps": args.scale_finetune_steps, "kl_first": float(np.mean(kls[:w])),
+                "kl_last": float(np.mean(kls[-w:])), "seconds": round(time.perf_counter() - t0, 1)}
+        print(f"scale fine-tune: KL {fine['kl_first']:.5f} -> {fine['kl_last']:.5f} "
+              f"in {fine['seconds']:.1f}s", flush=True)
+        del E, fnorm, h_ref, qblocks, base
+        mx.clear_cache()
+
+    # ---- sanity perplexity on validation windows (not the full evaluation) ------
+    sanity = None
+    if args.sanity_windows > 0:
+        ev = eval_windows(args.seq_len, split="validation", max_windows=args.sanity_windows)
+        E = lw.load("model.embed_tokens.weight")
+        fnorm = lw.load("model.norm.weight")
+        head = staged.tied_head(E)
+        hq = mx.stack([lw.load_rows("model.embed_tokens.weight", list(s)) for s in ev])
+        hf = hq
+        for i in range(N_LAYERS):
+            Wfp = fp_block_weights(lw, i)
+            if i in bits_by_layer:
+                _, _, lins = load_shard(shard_path(i))
+                Wq = staged.hard_block(lins, {k: Wfp[k] for k in Wfp if k not in LIN_ORDER},
+                                       args.group_size)
+            else:
+                Wq = Wfp
+            hq = staged.advance(stream, hq, Wq)
+            hf = staged.advance(stream, hf, Wfp)
+            del Wfp, Wq
+            mx.clear_cache()
+        sums = {}
+        for name, hs in (("fp", hf), ("quant", hq)):
+            hn = rmsnorm(hs, fnorm)
+            tot, n = nll_from_hidden(head, hn[:, :-1], ev[:, 1:])
+            sums[name] = (float(tot), n)
+        sanity = {"windows": int(ev.shape[0]), "seq_len": int(ev.shape[1]),
+                  "fp_ppl": math.exp(sums["fp"][0] / sums["fp"][1]),
+                  "quant_ppl": math.exp(sums["quant"][0] / sums["quant"][1]),
+                  "note": "sanity only (validation windows); the orchestrator runs evaluate.perplexity"}
+        print(f"sanity ppl on {sanity['windows']}x{sanity['seq_len']} validation: "
+              f"FP {sanity['fp_ppl']:.3f} quantized {sanity['quant_ppl']:.3f}", flush=True)
+        del E, fnorm, head, hq, hf
+        mx.clear_cache()
+
+    # ---- mlx-lm export of the quantized linears ----------------------------
+    export = None
+    if not args.no_export:
+        quantized, n_params = {}, 0
+        for i in layers:
+            _, _, lins = load_shard(shard_path(i))
+            for name in LIN_ORDER:
+                q = lins[name]
+                path = f"model.layers.{i}." + WKEY[name][: -len(".weight")]
+                quantized[path] = dict(codes=q["codes"], scales=q["scales"].astype(np.float32),
+                                       bits=q["bits"], group_size=args.group_size)
+                n_params += q["codes"].size
+        export_dir = args.export_dir or os.path.join(args.out, "mlx")
+        export_mlx_lm(export_dir, quantized, MODEL_DIR)
+        rep = bits_report(quantized, n_params)
+        export = {"dir": export_dir, "linears": len(quantized),
+                  "bits_per_weight": {k: rep[k] for k in ("code_bpp", "native_bpp", "mlx_bpp",
+                                                          "shard_bpp")}}
+        print(f"exported {len(quantized)} linears -> {export_dir}: code "
+              f"{rep['code_bpp']:.3f} | native {rep['native_bpp']:.3f} | MLX "
+              f"{rep['mlx_bpp']:.3f} bits/weight", flush=True)
+
+    run = {"config": dict(fp, layers=layers, uniform_bits=args.uniform_bits, alloc=args.alloc,
+                          layers_arg=args.layers, scale_finetune_steps=args.scale_finetune_steps),
+           "layers": {str(i): layer_stats[i] for i in layers if i in layer_stats},
+           "scale_finetune": fine, "sanity": sanity, "export": export,
+           "seconds_total": round(time.perf_counter() - t_all, 1),
+           "max_rss_bytes": int(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)}
+    with open(os.path.join(args.out, "run_log.json"), "w") as f:
+        json.dump(run, f, indent=1)
+    print(f"wrote {os.path.join(args.out, 'run_log.json')} in {run['seconds_total'] / 60:.1f} min; "
+          f"max RSS {run['max_rss_bytes'] / 2**30:.2f} GB", flush=True)
+
+
+def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", default="synthetic",
-                    choices=["synthetic", "real"])
+    ap.add_argument("--mode", default="synthetic", choices=["synthetic", "real"])
     ap.add_argument("--bits", type=int, default=2, choices=[1, 2, 3, 4])
     ap.add_argument("--group-size", type=int, default=64)
     ap.add_argument("--config", default=CONFIG)
     ap.add_argument("--layers", default="0-23")
-    ap.add_argument("--steps", type=int, default=20)
-    ap.add_argument("--resamples", type=int, default=2)
+    ap.add_argument("--alloc", help="allocation JSON (per_linear_bits or per_layer_bits)")
+    ap.add_argument("--uniform-bits", type=int, choices=range(1, 9))
+    ap.add_argument("--n-cal", type=int, default=128, help="calibration sequences")
+    ap.add_argument("--seq-len", type=int, default=512)
+    ap.add_argument("--cal-seed", type=int, default=0)
+    ap.add_argument("--steps", type=int, default=200, help="Lion steps per stage")
+    ap.add_argument("--lr-logits", type=float, default=1e-4, help="logit lr (Table 7)")
+    ap.add_argument("--micro-batch", type=int, default=2)
+    ap.add_argument("--resamples", type=int, default=2, help="Gumbel resamples per step")
+    ap.add_argument("--damp", type=float, default=0.01, help="GPTQ damping")
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--out", default=OUT_DIR, help="shard, log and export directory")
+    ap.add_argument("--export-dir", help="mlx-lm export directory (default <out>/mlx)")
+    ap.add_argument("--no-export", action="store_true")
+    ap.add_argument("--sanity-windows", type=int, default=2,
+                    help="validation windows for the sanity perplexity (0 to skip)")
+    ap.add_argument("--scale-finetune-steps", type=int, default=0, help="App H steps (0 = off)")
     ap.add_argument("--resume", action="store_true")
-    ap.add_argument("--skip-fp", action="store_true")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> None:
+    args = build_parser().parse_args()
     if args.mode == "synthetic":
         run_synthetic(args)
     else:

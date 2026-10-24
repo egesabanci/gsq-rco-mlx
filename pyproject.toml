@@ -1,9 +1,8 @@
 [project]
 name = "gsq-rco-mlx"
 version = "0.1.0"
-requires-python = ">=3.10,<3.14"
-dependencies = ["numpy>=1.24", "tqdm>=4.60"]
-optional-dependencies = { mlx = ["mlx>=0.20", "mlx-lm>=0.20"] }
+requires-python = ">=3.12,<3.14"
+dependencies = ["numpy>=1.24", "tqdm>=4.60", "huggingface_hub>=0.23", "mlx>=0.20", "mlx-lm>=0.20"]
 
 [tool.pytest.ini_options]
 testpaths = ["scripts", "src"]

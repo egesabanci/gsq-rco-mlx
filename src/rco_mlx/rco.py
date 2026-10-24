@@ -116,20 +116,52 @@ def ste_grad(upstream, p, tau: float):
 
 # ------------------------------------------------------------ int grid ---
 
-def to_int_grid(costs, weights, budget, ticks: int = 1):
+def to_int_grid(costs, weights, budget, ticks: int = 1,
+                allow_rounding: bool = False):
     """Map float costs/budget to the DP integer grid (paper Sec 3.1).
 
-    costs_int = round(costs * ticks), budget_int = round(budget * ticks),
-    weights rounded to ints (Phase 1 uses unit weights). Rounding is the
-    source of the small decoded-budget deviations discussed in Sec 1;
-    for bit options [2,3,4,8] with ticks=1 the grid is exact.
+    costs_int = round(costs * ticks), budget_int = round(budget * ticks).
+    Weights must already be integer-valued (build them with
+    integer_weights): a fractional weight raises unless allow_rounding=True,
+    because rounding it silently changes the budget being enforced. For bit
+    options [2,3,4,8] with ticks=1 the grid is exact.
     """
     c = np.asarray(costs, dtype=np.float64)
     w = np.asarray(weights, dtype=np.float64)
+    wr = np.round(w)
+    if not allow_rounding and not np.array_equal(wr, w):
+        raise ValueError(
+            "to_int_grid: weights are not integer-valued; pass "
+            "integer_weights(counts) or allow_rounding=True (rounding changes "
+            "the budget being enforced)")
     ci = np.round(c * int(ticks)).astype(np.int64)
-    wi = np.round(w).astype(np.int64)
+    wi = wr.astype(np.int64)
     Bi = int(round(float(budget) * int(ticks)))
     return ci, wi, Bi
+
+
+def integer_weights(counts):
+    """Exact integer group weights: parameter counts divided by their gcd.
+
+    Returns (w_int, unit) with counts == w_int * unit, no rounding. For the
+    Qwen2.5-0.5B linear layers (q/o 802816, k/v 114688, gate/up/down
+    4358144) unit = 114688 and w_int = [7, 1, 1, 7, 38, 38, 38].
+    """
+    raw = np.asarray(counts)
+    if raw.size == 0:
+        raise ValueError("counts must be non-empty")
+    if raw.dtype.kind == "f":
+        if not (np.all(np.isfinite(raw)) and np.all(raw == np.round(raw))):
+            raise ValueError("counts must be integer-valued")
+    elif raw.dtype.kind not in "iu":
+        raise ValueError(f"counts must be numeric, got dtype {raw.dtype}")
+    ints = raw.astype(np.int64)
+    if np.any(ints < 0):
+        raise ValueError("counts must be nonnegative")
+    unit = int(np.gcd.reduce(ints.reshape(-1)))
+    if unit == 0:
+        raise ValueError("all counts are zero")
+    return ints // unit, unit
 
 
 # --------------------------------------------- synthetic KL + assembly ---
@@ -177,22 +209,36 @@ def assemble_weights_stub(z: np.ndarray, values_per_option: np.ndarray):
 
 # ------------------------------------------------------------------ loop ---
 
+def _unpack_grad(out):
+    """grad_fn returns dL/dy, or (dL/dy, loss) to log a per-sample loss."""
+    if isinstance(out, tuple):
+        up, loss = out
+        return up, float(loss)
+    return out, None
+
+
 def rco_loop(logits_init, costs, weights, budget, steps: int = 10,
              g: int = G_DEFAULT, lr: float = LR_DEFAULT, seed: int = 0,
              tau0: float = TAU0, tau_min: float = TAU_MIN,
              beta1: float = ADAM_BETAS[0], beta2: float = ADAM_BETAS[1],
              eps: float = ADAM_EPS, grad_fn=None, use_mx: bool = False,
-             ticks: int = 1):
-    """RCO skeleton (paper Alg.1). Returns dict with logits, momentum,
-    per-step history [{t, tau, cost}], final DP assignment + costs.
+             ticks: int = 1, callback=None):
+    """RCO (paper Alg.1). Returns dict with logits, momentum, velocity,
+    per-step history [{t, tau, cost[, loss]}], final DP assignment + costs.
 
-    grad_fn(z, p, step, sample, rng) -> upstream dL/dy, evaluated at the
-    forward value y = z (STE: forward z, backward p). Default None uses a
-    seeded-Gaussian surrogate KL gradient (deterministic given seed).
-    Adam-style step (default lr 0.1, App F range 0.05-0.2) with bias
-    correction; retract after every step keeps |C-B| ~ 1e-9; momentum
-    transport keeps m tangent.
+    grad_fn(z, p, step, sample, rng) is required (ValueError if None: a
+    random default would silently optimise noise). It returns the upstream
+    dL/dy at the forward value y = z (STE: forward z, backward p), or a
+    tuple (dL/dy, loss); with a loss, history[t]["loss"] is the mean over
+    the g samples. Adam-style step (default lr 0.1, App F range 0.05-0.2)
+    with bias correction; retraction after every step keeps |C-B| within
+    tolerance; momentum transport keeps m tangent. callback(t, logits,
+    record), if given, runs after each step.
     """
+    if grad_fn is None:
+        raise ValueError(
+            "rco_loop needs grad_fn(z, p, step, sample, rng) returning dL/dy "
+            "(or (dL/dy, loss)); there is no silent random default")
     c_np = np.asarray(costs, dtype=np.float64)
     w_np = np.asarray(weights, dtype=np.float64)
     B = float(budget)
@@ -217,22 +263,21 @@ def rco_loop(logits_init, costs, weights, budget, steps: int = 10,
     history = []
     for t in range(steps):
         tau = tau_schedule(t, steps, tau0, tau_min)
+        losses = []
         if use_mx:
             g_acc = mx.zeros_like(a)
             for j in range(g):
                 Gj = mx.random.gumbel(shape=list(a.shape))
                 h = perturbed_logits(a, Gj, tau)
                 mx.eval(h)
-                h_np = np.asarray(h, dtype=np.float64)
-                z = dp_knapsack(h_np / max(tau, 1e-3), ci, wi, Bi)
+                z = dp_knapsack(np.asarray(h, dtype=np.float64), ci, wi, Bi)
                 p = soft_probs(h)
-                if grad_fn is None:
-                    up_np = rng.standard_normal(h_np.shape)
-                else:
-                    mx.eval(p)
-                    up_np = np.asarray(
-                        grad_fn(z, np.asarray(p, dtype=np.float64), t, j, rng),
-                        dtype=np.float64)
+                mx.eval(p)
+                up, loss = _unpack_grad(
+                    grad_fn(z, np.asarray(p, dtype=np.float64), t, j, rng))
+                if loss is not None:
+                    losses.append(loss)
+                up_np = np.asarray(up, dtype=np.float64)
                 up = mx.array(up_np.astype(np.float32))
                 g_acc = g_acc + ste_grad(up, p, tau)
             g_avg = g_acc / g
@@ -249,18 +294,17 @@ def rco_loop(logits_init, costs, weights, budget, steps: int = 10,
             mx.eval(a, m, v)
             cv = expected_cost(a, c_np, w_np)
             mx.eval(cv)
-            history.append({"t": t, "tau": tau, "cost": float(cv.item())})
+            cost = float(cv.item())
         else:
             g_acc = np.zeros_like(a)
             for j in range(g):
                 Gj = sample_gumbel(a.shape, rng=rng)
                 h = perturbed_logits(a, Gj, tau)
-                z = dp_knapsack(h / max(tau, 1e-3), ci, wi, Bi)
+                z = dp_knapsack(h, ci, wi, Bi)
                 p = np.asarray(soft_probs(h))
-                if grad_fn is None:
-                    up = rng.standard_normal(a.shape)
-                else:
-                    up = np.asarray(grad_fn(z, p, t, j, rng), dtype=np.float64)
+                up, loss = _unpack_grad(grad_fn(z, p, t, j, rng))
+                if loss is not None:
+                    losses.append(loss)
                 g_acc = g_acc + ste_grad(up, p, tau)
             g_avg = g_acc / g
             n = normal_vector(a, c_np, w_np)
@@ -272,8 +316,15 @@ def rco_loop(logits_init, costs, weights, budget, steps: int = 10,
             a = a - lr * mhat / (np.sqrt(vhat) + eps)
             a = retract(a, c_np, w_np, B)
             m = transport(m, normal_vector(a, c_np, w_np))
-            history.append({"t": t, "tau": tau,
-                            "cost": expected_cost(a, c_np, w_np)})
+            cost = expected_cost(a, c_np, w_np)
+        if losses and len(losses) != g:
+            raise ValueError("grad_fn returned a loss for some samples only")
+        record = {"t": t, "tau": tau, "cost": cost}
+        if losses:
+            record["loss"] = float(np.mean(losses))
+        history.append(record)
+        if callback is not None:
+            callback(t, a, record)
 
     if use_mx:
         mx.eval(a)

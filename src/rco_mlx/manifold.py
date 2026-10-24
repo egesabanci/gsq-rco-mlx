@@ -33,6 +33,13 @@ except Exception:
     mx = None  # type: ignore
     _HAS_MLX = False
 
+# Retraction tolerances (App A.2). The float64 path uses the paper's
+# eps = 1e-8 on the cost residual; the float32 mx path cannot resolve the
+# residual below ~1e-6 relative, so it uses a tolerance relative to |B|.
+RETRACT_TOL = 1e-8
+RETRACT_TOL_F32 = 1e-5
+RETRACT_MAX_SHIFT = 1e6
+
 
 def _is_mx(x) -> bool:
     return _HAS_MLX and isinstance(x, mx.array)
@@ -117,14 +124,37 @@ def _feasible_range(costs, weights):
     return float(w.sum() * c.min()), float(w.sum() * c.max())
 
 
-def retract(logits, costs, weights, budget, lo=-50.0, hi=50.0, iters=40):
-    """Binary-search retract t* s.t. C(a + t*c) = B (paper Prop.3).
+def _bracket_root(cost_at, budget: float, eps: float, lo: float, hi: float,
+                  max_shift: float):
+    """Widen [lo, hi] geometrically until cost_at(lo) <= B <= cost_at(hi)
+    (within eps). cost_at is nondecreasing in t (Prop.3), so the root lies
+    inside the returned bracket. Raises ValueError past |t| > max_shift."""
+    span = max(hi - lo, 1.0)
+    while cost_at(lo) > budget + eps:
+        hi, lo, span = lo, lo - 2.0 * span, 2.0 * span
+        if abs(lo) > max_shift:
+            raise ValueError(
+                f"budget {budget} not bracketed for |t| <= {max_shift:g}")
+    while cost_at(hi) < budget - eps:
+        lo, hi, span = hi, hi + 2.0 * span, 2.0 * span
+        if abs(hi) > max_shift:
+            raise ValueError(
+                f"budget {budget} not bracketed for |t| <= {max_shift:g}")
+    return lo, hi
 
-    C(a + t*c) is strictly increasing in t (dC/dt = sum_i w_i Var[c] > 0
-    when costs are not all equal), so bisection converges exponentially
-    (~34 iters theory for R=100/eps=1e-8; 40 default). Non-differentiable
-    projection step: do NOT call inside an mx.grad closure — step, then
-    retract, then continue (paper Alg.1 lines 11-12).
+
+def retract(logits, costs, weights, budget, lo=-50.0, hi=50.0, iters=200,
+            tol=None, max_shift=RETRACT_MAX_SHIFT):
+    """Retraction t* s.t. C(a + t*c) = B (paper Prop.3, App A.2).
+
+    C(a + t*c) is strictly increasing in t unless all costs are equal
+    (dC/dt = sum_i w_i Var_{p_i}[c] > 0), so the root is unique on the
+    feasible range. The bracket [lo, hi] is verified and widened
+    geometrically if it misses the root (up to |t| <= max_shift). Bisection
+    stops once |C - B| <= tol: RETRACT_TOL (paper eps) on the float64 path,
+    RETRACT_TOL_F32 * max(1, |B|) on the mx float32 path. Raises RuntimeError
+    if `iters` bisection steps do not reach tol. Non-differentiable
+    projection step: do NOT call inside an mx.grad closure.
     """
     blo, bhi = _feasible_range(costs, weights)
     if not (blo - 1e-9 <= budget <= bhi + 1e-9):
@@ -133,32 +163,48 @@ def retract(logits, costs, weights, budget, lo=-50.0, hi=50.0, iters=40):
             f"(sum w * min/max cost)")
     if _use_mx(logits, costs, weights):
         a = logits if _is_mx(logits) else mx.array(np.asarray(logits))
-        c = _as_mx_like(a, costs)
-        w = _as_mx_like(a, weights)
-        c1 = mx.expand_dims(c, 0)
-        w1 = mx.expand_dims(w, 1)
-        lo_f, hi_f = float(lo), float(hi)
-        for _ in range(iters):
-            mid = 0.5 * (lo_f + hi_f)
-            cand = a + mid * c1
-            cv = mx.sum(w1 * mx.softmax(cand, axis=1) * c1)
+        c1 = mx.expand_dims(_as_mx_like(a, costs), 0)
+        w1 = mx.expand_dims(_as_mx_like(a, weights), 1)
+        eps = (RETRACT_TOL_F32 * max(1.0, abs(float(budget)))
+               if tol is None else float(tol))
+
+        def shifted(t):
+            return a + t * c1
+
+        def cost_at(t):
+            cv = mx.sum(w1 * mx.softmax(shifted(t), axis=1) * c1)
             mx.eval(cv)
-            if float(cv.item()) < float(budget):
-                lo_f = mid
-            else:
-                hi_f = mid
-        return a + (0.5 * (lo_f + hi_f)) * c1
-    a = np.asarray(logits, dtype=np.float64).copy()
-    c = np.asarray(costs, dtype=np.float64)
-    lo_f, hi_f = float(lo), float(hi)
+            return float(cv.item())
+    else:
+        a = np.asarray(logits, dtype=np.float64)
+        c = np.asarray(costs, dtype=np.float64)
+        w = np.asarray(weights, dtype=np.float64)
+        eps = RETRACT_TOL if tol is None else float(tol)
+
+        def shifted(t):
+            return a + t * c[None, :]
+
+        def cost_at(t):
+            return expected_cost(shifted(t), c, w)
+
+    lo_f, hi_f = _bracket_root(cost_at, float(budget), eps, float(lo),
+                               float(hi), float(max_shift))
+    res = float("inf")
     for _ in range(iters):
         mid = 0.5 * (lo_f + hi_f)
-        if expected_cost(a + mid * c[None, :], c,
-                         np.asarray(weights, dtype=np.float64)) < budget:
+        if not lo_f < mid < hi_f:  # bracket exhausted at float resolution
+            break
+        cm = cost_at(mid)
+        res = abs(cm - float(budget))
+        if res <= eps:
+            return shifted(mid)
+        if cm < budget:
             lo_f = mid
         else:
             hi_f = mid
-    return a + (0.5 * (lo_f + hi_f)) * c[None, :]
+    raise RuntimeError(
+        f"retract: no shift reached |C-B| <= {eps:.3g} (best {res:.3g}) "
+        f"within {iters} steps or float resolution")
 
 
 # ------------------------------------------------------- discrete decode ---
@@ -177,24 +223,53 @@ def assignment_cost(z: np.ndarray, costs_int: np.ndarray,
     return int(((z * c[None, :]).sum(axis=1) * w).sum())
 
 
-def topk_2option(scores: np.ndarray, costs_int: np.ndarray,
-                 weights_int: np.ndarray, budget_int: int) -> np.ndarray:
-    """Exact O(N log N) fast path for K=2 with uniform weights
-    (paper Sec 3.1 / App B.1: keep/prune costs {0,1}, budget fixes count).
+def _int_array(x, name: str) -> np.ndarray:
+    """Flat int64 array. Floats must be integer-valued: rounding is refused."""
+    a = np.asarray(x).reshape(-1)
+    if a.dtype.kind in "biu":
+        return a.astype(np.int64)
+    if (a.dtype.kind != "f" or not np.all(np.isfinite(a))
+            or not np.all(a == np.round(a))):
+        raise ValueError(f"{name} must be integer-valued, got {a.tolist()}")
+    return a.astype(np.int64)
 
-    Exact whenever all group weights are equal: every group has the same
-    cost step, so the knapsack reduces to picking the n_hi best logit
-    deltas. Non-uniform weights fall back to full DP (use dp_knapsack).
+
+def _int_scalar(x, name: str) -> int:
+    a = _int_array(x, name)
+    if a.size != 1:
+        raise ValueError(f"{name} must be a scalar, got {a.size} values")
+    return int(a[0])
+
+
+def topk_2option(scores: np.ndarray, costs_int: np.ndarray,
+                 weights_int: np.ndarray, budget_int: int,
+                 exact_count: bool = False) -> np.ndarray:
+    """O(N log N) exact decode for K=2 with uniform group weights
+    (paper Sec 3.1 / App B.1).
+
+    With base cost N*w*c_lo and per-group upgrade step w*(c_hi - c_lo), the
+    budget allows n = min(floor((B' - base) / step), N) upgrades, and the
+    best choice is the n largest deltas s_hi - s_lo.
+
+    exact_count=False (default, the <= B' problem of Eq.4): at most n
+    upgrades, and only those with a strictly positive delta, so the optimum
+    matches the full DP. exact_count=True (equality semantics, e.g. expert
+    pruning where the budget fixes how many experts are pruned): exactly n
+    upgrades, even when some deltas are negative. Ties in the ranking go to
+    the lower group index. Non-uniform weights raise; use dp_knapsack.
     """
     s = np.asarray(scores, dtype=np.float64)
     if s.ndim != 2 or s.shape[1] != 2:
         raise ValueError(f"topk_2option needs scores [N,2], got {s.shape}")
+    if not np.all(np.isfinite(s)):
+        raise ValueError("scores must be finite")
     N = s.shape[0]
-    c = np.asarray(costs_int).reshape(-1).astype(np.int64)
-    w = np.asarray(weights_int).reshape(-1).astype(np.int64)
+    c = _int_array(costs_int, "costs_int")
+    w = _int_array(weights_int, "weights_int")
+    B = _int_scalar(budget_int, "budget_int")
     if c.shape != (2,) or w.shape != (N,):
         raise ValueError("costs must be [2], weights [N]")
-    if int(budget_int) < 0:
+    if B < 0:
         raise ValueError("budget_int must be >= 0")
     if np.any(c < 0) or np.any(w < 0):
         raise ValueError("costs/weights must be nonneg ints")
@@ -202,43 +277,79 @@ def topk_2option(scores: np.ndarray, costs_int: np.ndarray,
         raise ValueError("topk_2option is exact only for uniform weights; "
                          "use dp_knapsack for non-uniform weights")
     w0 = int(w[0])
-    c0, c1 = int(c[0]), int(c[1])
-    z = np.zeros((N, 2))
-    if c0 == c1:  # cost-blind: per-row argmax (any feasible pick)
-        z[np.arange(N), s.argmax(axis=1)] = 1.0
-        return z
-    lo_k, hi_k = (0, 1) if c0 < c1 else (1, 0)
+    lo_k, hi_k = (0, 1) if c[0] <= c[1] else (1, 0)
     lo_c, hi_c = int(c[lo_k]), int(c[hi_k])
     base = N * w0 * lo_c
+    if base > B:
+        raise ValueError(f"infeasible: cheapest cost {base} > budget {B}")
     step = w0 * (hi_c - lo_c)
-    if base > int(budget_int):
-        raise ValueError(
-            f"infeasible: cheapest cost {base} > budget {budget_int}")
-    n_hi = (int(budget_int) - base) // step
-    n_hi = min(max(n_hi, 0), N)
+    z = np.zeros((N, 2))
+    if step == 0:  # every assignment costs the same: per-row argmax
+        if exact_count:
+            raise ValueError("exact_count needs a nonzero cost step")
+        z[np.arange(N), s.argmax(axis=1)] = 1.0
+        return z
+    n = min((B - base) // step, N)
     delta = s[:, hi_k] - s[:, lo_k]
+    order = np.argsort(-delta, kind="stable")  # largest delta, ties by index
+    if not exact_count:
+        order = order[delta[order] > 0]
+    up = order[:n]
     z[:, lo_k] = 1.0
-    if n_hi > 0:
-        idx = np.argsort(delta, kind="stable")[-n_hi:]
-        z[idx, lo_k] = 0.0
-        z[idx, hi_k] = 1.0
+    z[up, lo_k] = 0.0
+    z[up, hi_k] = 1.0
+    return z
+
+
+def _mckp_dp(s: np.ndarray, step: np.ndarray, budget: int) -> np.ndarray:
+    """Exact multiple-choice knapsack DP over the budget axis (Eq.4).
+
+    dp[b] is the best value of the groups processed so far with total cost
+    <= b, so dp stays nondecreasing in b. Each (group, option) updates all
+    budgets at once with numpy slices.
+    """
+    N, K = s.shape
+    B = budget
+    dp = np.zeros(B + 1)
+    choice = np.zeros((N, B + 1), dtype=np.uint8)
+    for i in range(N):
+        new = np.full(B + 1, -np.inf)
+        for k in range(K):
+            cst = int(step[i, k])
+            if cst > B:
+                continue
+            cand = dp[: B + 1 - cst] + s[i, k]
+            tgt = new[cst:]
+            better = cand > tgt  # strict: the lowest option index keeps ties
+            np.copyto(tgt, cand, where=better)
+            np.copyto(choice[i, cst:], np.uint8(k), where=better)
+        dp = new
+    # Smallest budget that reaches the optimum: the cheapest optimal solution.
+    b = int(np.argmax(dp >= dp[B]))
+    z = np.zeros((N, K))
+    for i in range(N - 1, -1, -1):
+        k = int(choice[i, b])
+        z[i, k] = 1.0
+        b -= int(step[i, k])
     return z
 
 
 def dp_knapsack(scores: np.ndarray, costs_int: np.ndarray,
                 weights_int: np.ndarray, budget_int: int,
                 use_topk: bool = True) -> np.ndarray:
-    """Multiple-choice knapsack, paper Eq.4, O(N*K*B'). Returns one-hot z.
+    """Multiple-choice knapsack, paper Eq.4: one-hot z maximising sum z*s
+    with sum_i w_i c_{k(i)} <= B' (integer grid, Sec 3.1), one option per
+    group.
 
-    Each row picks exactly one k, sum_i w_i*c_{k(i)} <= B (integer grid;
-    Sec 3.1: per-group costs are rounded to this grid — the source of the
-    small decoded-budget deviations). CPU-side by design (App B.1);
-    mx-array scores are evaluated + converted, result is numpy one-hot.
-
-    K=2 with uniform weights auto-dispatches to the exact O(N log N)
-    top-k path (disable with use_topk=False to force full DP).
-    Tiny-model sizes only; uses -inf DP. Raises ValueError when the
-    cheapest assignment already exceeds the budget.
+    Exact DP vectorised over the budget axis: time O(N*K*B') in numpy,
+    choice table N*(B'+1) bytes. Ties are deterministic: the lowest option
+    index wins inside the DP, and among equally good assignments the
+    cheapest is returned. Costs, weights and budget must be integer-valued;
+    nothing is rounded here (use to_int_grid / integer_weights upstream).
+    Raises ValueError when the cheapest assignment already exceeds the
+    budget. K=2 with uniform weights dispatches to topk_2option, which has
+    the same optimal value (ties may resolve differently); use_topk=False
+    forces the full DP. CPU-side by design (App B.1).
     """
     s = np.asarray(scores, dtype=np.float64)
     if s.ndim != 2 or s.shape[0] < 1 or s.shape[1] < 1:
@@ -246,9 +357,11 @@ def dp_knapsack(scores: np.ndarray, costs_int: np.ndarray,
     if not np.all(np.isfinite(s)):
         raise ValueError("scores must be finite")
     N, K = s.shape
-    c = np.asarray(costs_int).reshape(-1).astype(np.int64)
-    w = np.asarray(weights_int).reshape(-1).astype(np.int64)
-    B = int(budget_int)
+    if K > 255:
+        raise ValueError("dp_knapsack supports at most 255 options per group")
+    c = _int_array(costs_int, "costs_int")
+    w = _int_array(weights_int, "weights_int")
+    B = _int_scalar(budget_int, "budget_int")
     if c.shape != (K,) or w.shape != (N,):
         raise ValueError(
             f"costs must be [{K}], weights [{N}], "
@@ -257,38 +370,11 @@ def dp_knapsack(scores: np.ndarray, costs_int: np.ndarray,
         raise ValueError("budget_int must be >= 0")
     if np.any(c < 0) or np.any(w < 0):
         raise ValueError("costs/weights must be nonneg ints")
-    if int((w * c.min()).sum()) > B:
-        raise ValueError(
-            f"infeasible: cheapest cost {int((w * c.min()).sum())} "
-            f"> budget {B}")
+    cheapest = int((w * c.min()).sum())
+    if cheapest > B:
+        raise ValueError(f"infeasible: cheapest cost {cheapest} > budget {B}")
     if K == 1:
         return np.ones((N, 1))
     if use_topk and K == 2 and np.all(w == w[0]):
         return topk_2option(s, c, w, B)
-
-    NEG = -1e100
-    dp = np.full(B + 1, NEG)
-    dp[0] = 0.0
-    choice = np.zeros((N, B + 1), dtype=np.int32)
-    prev = np.zeros((N, B + 1), dtype=np.int32)
-    step_cost = (w[:, None] * c[None, :]).astype(np.int64)  # [N,K]
-    for i in range(N):
-        ndp = np.full(B + 1, NEG)
-        sci, stepi = s[i], step_cost[i]
-        for b in range(B + 1):
-            best, bk, pb = NEG, 0, 0
-            for k in range(K):
-                cc = int(stepi[k])
-                if b - cc >= 0 and dp[b - cc] > NEG / 2:
-                    v = dp[b - cc] + float(sci[k])
-                    if v > best:
-                        best, bk, pb = v, k, b - cc
-            ndp[b], choice[i, b], prev[i, b] = best, bk, pb
-        dp = ndp
-    b = int(np.argmax(dp))
-    z = np.zeros((N, K))
-    for i in range(N - 1, -1, -1):
-        k = int(choice[i, b])
-        z[i, k] = 1.0
-        b = int(prev[i, b])
-    return z
+    return _mckp_dp(s, w[:, None] * c[None, :], B)

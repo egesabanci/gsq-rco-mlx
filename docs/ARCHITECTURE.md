@@ -4,11 +4,11 @@ One Python package, `gsq_rco`, holds both algorithms, the shared data and evalua
 `gsq-rco` command line. Back to the [README](../README.md). Commands are in [CLI.md](CLI.md), and the
 numbers are in [RESULTS.md](RESULTS.md).
 
-The two papers are the references for the code. Their text extractions are tracked at the repository root:
+The two papers are the references for the code:
 
-- **GSQ**, [`papers/gsq.pdf`](../papers/gsq.pdf): Dadgarnia et al., "GSQ: Highly-Accurate Low-Precision Scalar Quantization
+- **GSQ**, [arXiv:2604.18556](https://arxiv.org/abs/2604.18556): Dadgarnia et al., "GSQ: Highly-Accurate Low-Precision Scalar Quantization
   for LLMs via Gumbel-Softmax Sampling".
-- **RCO**, [`papers/rco.pdf`](../papers/rco.pdf): Helcig and Alistarh, "Model Compression with Exact Budget Constraints via
+- **RCO**, [arXiv:2605.00649](https://arxiv.org/abs/2605.00649): Helcig and Alistarh, "Model Compression with Exact Budget Constraints via
   Riemannian Manifolds".
 
 ## Package map
@@ -100,7 +100,7 @@ allocation and the calibration stream, and writes its own shards.
 
 ## Paper-to-code map
 
-### GSQ ([paper](../papers/gsq.pdf))
+### GSQ ([paper](https://arxiv.org/abs/2604.18556))
 
 | Paper | Content | Code |
 |---|---|---|
@@ -126,7 +126,7 @@ Within a stage, each linear gets a GPTQ warm start. Its Hessian comes from its r
 earlier stages hardened, and the earlier linears of this stage at their GPTQ values. Then the logits and scales
 are trained with Lion and hardened to argmax codes. Scales are rounded to fp16, which is the stored form.
 
-### RCO ([paper](../papers/rco.pdf))
+### RCO ([paper](https://arxiv.org/abs/2605.00649))
 
 | Paper | Content | Code |
 |---|---|---|

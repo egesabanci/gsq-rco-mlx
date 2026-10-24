@@ -7,8 +7,10 @@ no safetensors — memory-critical Mac 17GB/~2.5GB free), all under 30s:
      soft weights converge to hard weights as tau -> 0 (paper Sec 3).
   T2 local-shift indices always in [0, K-1] incl. edges; soft decode
      bounded by s*max|grid| (paper Eq.6).
-  T3 Lion decreases the synthetic linear-layer loss (paper App G Lion,
-     lr 1e-4 logits / 2e-5 scales, grad accumulation over resamples).
+  T3 GSQ optimization of a synthetic linear layer (paper App G): analytic
+     gradients match finite differences; the HARD loss (argmax codes + learned
+     group scales) falls clearly below the App A init and below a zero-lr
+     control run with the identical tau/kappa schedule.
   T4 ternary mask+sign paths: soft in [-s,s], hard in {-s,0,s} (Alg.2).
   T5 mlx parity: same ops on mx arrays match numpy; a staged linear loss
      closure differentiates under mx.value_and_grad (skipped if no mlx).
@@ -24,14 +26,15 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import numpy as np
 
+from gsq_mlx.gptq import init_logits_2bit_from_codes, quantize_rtn
 from gsq_mlx.quant import (
-    get_grid, gptq_init_logits, gumbel_softmax_sample, quantize_soft,
-    quantize_hard, ternary_soft, ternary_hard, local_shift_indices,
+    get_grid, gumbel_softmax_sample, quantize_soft, quantize_hard,
+    ternary_soft, ternary_hard, local_shift_indices,
     local_shift_quantize_soft, local_shift_decode, gs_schedules,
 )
-from gsq_mlx.lion import Lion
+from gsq_mlx.lion import LR_LOGITS, Lion
 from gsq_mlx.block_train import (
-    train_linear_synthetic, linear_mse_np, synthetic_calibration,
+    linear_loss_and_grads_np, synthetic_calibration, train_linear_synthetic,
 )
 
 try:
@@ -53,7 +56,8 @@ def check(name: str, cond: bool, detail: str = "") -> None:
 # ---- T1: soft-to-hard collapse as tau -> 0 -------------------------------
 w = rng.standard_normal(256).astype(np.float32)
 grid2 = get_grid(2)
-logits = gptq_init_logits(w, grid2, rng=np.random.default_rng(0))
+codes1 = quantize_rtn(w.reshape(16, 16), 2, group_size=16)["codes"].reshape(-1)
+logits = init_logits_2bit_from_codes(codes1, len(grid2), seed=0)  # App A init
 s = float(np.abs(w).mean())
 mp_hi, mp_lo, mse_hi, mse_lo = [], [], [], []
 wh, _ = quantize_hard(logits, grid2, s)
@@ -104,21 +108,68 @@ check("T2 shift hard consistent",
       np.array_equal(np.asarray(jh3), j),
       f"decode matches indices, mse={float(((wh3 - grid3[j] * s) ** 2).mean()):.2e}")
 
-# ---- T3: Lion decreases synthetic linear loss -----------------------------
-# scale_mult=0.5 starts the joint (logits, scale) loop off-scale so the
-# staged Lion optimization has measurable headroom; RTN-warm-started
-# logits + per-tensor scale, paper App G lrs, accumulation over resamples.
-res = train_linear_synthetic(n_bits=2, steps=60, n_resamples=4, seed=0,
-                             scale_mult=0.5)
-hist = res["history"]
-check("T3 Lion decreases loss",
-      hist[-1] < hist[0] and np.all(np.isfinite(hist)),
-      f"init={hist[0]:.6f} final={hist[-1]:.6f} ratio={hist[-1] / hist[0]:.3f}")
-check("T3 Lion solid progress", hist[-1] < 0.9 * hist[0],
-      f"ratio={hist[-1] / hist[0]:.3f}")
-moved = float(np.abs(np.asarray(res["params"]["logits"])).sum())
-check("T3 Lion steps moved params", moved > 0 and np.all(np.isfinite(
-    np.asarray(res["params"]["logits"]))), f"|logits|_sum={moved:.3f}")
+# ---- T3: GSQ optimization of a synthetic linear layer (paper App G) --------
+# Gradient check: analytic dL/dlogits and dL/dscales vs central finite differences.
+rg = np.random.default_rng(3)
+Wg = (rg.standard_normal((4, 8)) * 0.02).astype(np.float32)
+Xg = synthetic_calibration(4, 4, 8, seed=4)
+rtn_g = quantize_rtn(Wg, 2, group_size=4)
+logit_g = init_logits_2bit_from_codes(rtn_g["codes"], len(grid2), seed=5).astype(np.float64)
+logit_g += rg.standard_normal(logit_g.shape) * 0.02  # move off the init so every entry matters
+scales_g = rtn_g["scales"].astype(np.float64)
+ent = [(0, 0), (5, 2), (9, 1), (13, 3), (31, 0)]
+for tau_g, kappa_g in [(2.0, 100.0), (0.5, 300.0)]:
+    def loss_of(lg, sc):
+        return linear_loss_and_grads_np(Xg, Wg, lg, grid2, sc, 4, tau_g, kappa_g,
+                                        n_resamples=1, seed=7)[0]
+    _, glog, gsc = linear_loss_and_grads_np(Xg, Wg, logit_g, grid2, scales_g, 4,
+                                            tau_g, kappa_g, n_resamples=1, seed=7)
+    eps = 1e-6
+    fd_l = []
+    for dd, kk in ent:
+        lp, lm = logit_g.copy(), logit_g.copy()
+        lp[dd, kk] += eps
+        lm[dd, kk] -= eps
+        fd_l.append((loss_of(lp, scales_g) - loss_of(lm, scales_g)) / (2 * eps))
+    err_l = float(np.max(np.abs(np.array(fd_l) - np.array([glog[dd, kk] for dd, kk in ent]))))
+    err_l /= float(np.abs(glog).max())
+    fd_s = []
+    for rr, cc in [(0, 0), (1, 1), (3, 0)]:
+        sp, sm = scales_g.copy(), scales_g.copy()
+        sp[rr, cc] += eps
+        sm[rr, cc] -= eps
+        fd_s.append((loss_of(logit_g, sp) - loss_of(logit_g, sm)) / (2 * eps))
+    err_s = float(np.max(np.abs(np.array(fd_s) - np.array([gsc[rr, cc] for rr, cc in [(0, 0), (1, 1), (3, 0)]]))))
+    err_s /= float(np.abs(gsc).max())
+    check(f"T3 analytic logit gradient matches finite differences (tau={tau_g})",
+          err_l < 1e-4, f"max err / max|grad| = {err_l:.2e}")
+    check(f"T3 analytic scale gradient matches finite differences (tau={tau_g})",
+          err_s < 1e-6, f"max err / max|grad| = {err_s:.2e}")
+
+# Training: 1280 steps (paper ~1280 optimizer steps per block) at the paper lrs.
+# Arithmetic: App A leaves a gap sigma*alpha*0.5 = 0.01*6*0.5 = 0.03 between neighbouring
+# grid logits. Lion moves a logit by ~lr per step (plus wd*|theta|, negligible), so
+# 1280 * 1e-4 = 0.128 covers the gap about 4x. Control: lr = 0, identical schedule.
+res = train_linear_synthetic(n_bits=2, seed=0)
+ctrl = train_linear_synthetic(n_bits=2, seed=0, lr_logits=0.0, lr_scales=0.0)
+logit_only = train_linear_synthetic(n_bits=2, seed=0, lr_scales=0.0)
+ratio = res["hard_final"] / res["hard_init"]
+check("T3 GSQ moves codes across the App A gap",
+      res["n_flips"] > 0 and res["max_logit_move"] >= 0.03,
+      f"flips={res['n_flips']} max|dlogit|={res['max_logit_move']:.3f} lr*steps={LR_LOGITS * 1280:.3f}")
+check("T3 hard loss clearly below init (>= 20% lower)",
+      res["hard_final"] <= 0.8 * res["hard_init"],
+      f"init={res['hard_init']:.4e} final={res['hard_final']:.4e} ratio={ratio:.3f}")
+check("T3 hard loss clearly below zero-lr control (>= 20% lower)",
+      res["hard_final"] <= 0.8 * ctrl["hard_final"],
+      f"control={ctrl['hard_final']:.4e} ratio={res['hard_final'] / ctrl['hard_final']:.3f}")
+check("T3 logits alone (scales frozen) clearly below init",
+      logit_only["hard_final"] <= 0.8 * logit_only["hard_init"],
+      f"ratio={logit_only['hard_final'] / logit_only['hard_init']:.3f} flips={logit_only['n_flips']}")
+check("T3 zero-lr control leaves the hard loss unchanged",
+      ctrl["hard_final"] == ctrl["hard_init"], "")
+hs = res["soft_history"]
+print(f"      soft-loss curve (diagnostic only, not evidence): {hs[0]:.4e} -> {hs[-1]:.4e}")
 
 # ---- T4: ternary mask+sign (Alg.2) -----------------------------------------
 rt = np.random.default_rng(21)
@@ -128,13 +179,12 @@ lb = rt.standard_normal(d4).astype(np.float32)
 st = 0.05
 wt_soft = ternary_soft(lm, lb, st, 0.5, 200.0, rng=np.random.default_rng(22))
 wt_hard, (m4, b4) = ternary_hard(lm, lb, st)
-vals = set(np.unique(np.asarray(wt_hard)).tolist())
-check("T4 ternary soft bounded",
-      np.all(np.isfinite(wt_soft)) and float(np.abs(wt_soft).max()) <= st + 1e-6,
-      f"max|w|={np.abs(wt_soft).max():.4f}")
 uniq4 = np.asarray(wt_hard).reshape(-1)
 allow4 = np.array([-st, 0.0, st], dtype=np.float32)
 ok4 = bool(np.all(np.min(np.abs(uniq4[:, None] - allow4[None, :]), axis=1) < 1e-6))
+check("T4 ternary soft bounded",
+      np.all(np.isfinite(wt_soft)) and float(np.abs(wt_soft).max()) <= st + 1e-6,
+      f"max|w|={np.abs(wt_soft).max():.4f}")
 check("T4 ternary hard alphabet", ok4, "vals subset of {-s,0,s}")
 
 # ---- T5: mlx parity + grad --------------------------------------------------
@@ -170,15 +220,15 @@ if _HAS_MLX:
     def loss_fn(lg_, sc_):
         return linear_soft_loss_mx(lg_, sc_, gg, Xs, Wf, gv, tau, kap)
 
-    val, (glg, gsc) = mx.value_and_grad(loss_fn, argnums=(0, 1))(lg, sc)
-    mx.eval(val, glg, gsc)
+    val, (glg, gsc_mx) = mx.value_and_grad(loss_fn, argnums=(0, 1))(lg, sc)
+    mx.eval(val, glg, gsc_mx)
     check("T5 mlx grad finite",
-          bool(mx.all(mx.isfinite(glg))) and bool(mx.isfinite(gsc))
+          bool(mx.all(mx.isfinite(glg))) and bool(mx.isfinite(gsc_mx))
           and float(mx.sum(mx.abs(glg))) > 0,
           f"loss={float(val):.6f} |g|={float(mx.sum(mx.abs(glg))):.4f}")
-    opt = Lion({"logits": lg, "scale": sc}, lr=1e-4)
+    opt = Lion({"logits": lg, "scale": sc}, lr=LR_LOGITS)
     new = opt.step({"logits": lg, "scale": sc},
-                   {"logits": glg, "scale": gsc})
+                   {"logits": glg, "scale": gsc_mx})
     mx.eval(*new.values())
     check("T5 mlx Lion step updates",
           not bool(mx.array_equal(new["logits"], lg)), "")

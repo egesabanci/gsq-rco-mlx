@@ -18,7 +18,7 @@ Paper mapping:
   Sec 3.2 b>2   -> local-shift deltas {-2..2}, j = clip(j0+d) (Eq.6, Fig.1)
   App A   -> init helpers live in gptq.py (Gaussian prior around GPTQ/RTN)
   App G   -> TAU 2 -> 0.05 linear, KAPPA 100 -> 500 linear,
-             Lion lr 1e-4 (logits) / 2e-5 (scales), wd 1.0, betas (0.9, 0.95)
+             Lion lr 1e-4 (logits) / 5e-5 (scales), wd 1.0, betas (0.9, 0.95)
 """
 from __future__ import annotations
 import numpy as np
@@ -110,7 +110,7 @@ def gs_softmax(logits, g, tau: float, kappa: float):
     y = (float(kappa) * logits + np.asarray(g)) / tau
     y = y - y.max(axis=-1, keepdims=True)
     e = np.exp(y)
-    return (e / e.sum(axis=-1, keepdims=True)).astype(np.float32)
+    return (e / e.sum(axis=-1, keepdims=True)).astype(np.result_type(y.dtype, np.float32))
 
 
 def gumbel_softmax_sample(logits, tau: float, kappa: float,
@@ -188,40 +188,6 @@ def quantize_hard(logits, grid, scale: float):
     idx = np.asarray(logits).argmax(axis=-1)
     g = np.asarray(grid, dtype=np.float32)
     return (g[idx] * float(scale)).astype(np.float32), idx
-
-
-def gptq_init_logits(w, grid, alpha: float = 6.0,
-                     std: float = 0.01, rng: np.random.Generator | None = None,
-                     key=None):
-    """Warm-start logits around nearest-grid (GPTQ proxy = RTN here).
-
-    Real GPTQ needs Hessian; for tiny MLX runs RTN-nearest is the init and the
-    GSQ optimization recovers most of the gap (paper App.A).
-    Returns logits [d, K]. Numpy in -> numpy out; mx in -> mx out.
-    """
-    K = len(grid)
-    if _is_mx(w) or key is not None:
-        assert _HAS_MLX
-        ww = w if _is_mx(w) else mx.array(np.asarray(w, dtype=np.float32))
-        g = _grid_as(ww, grid)
-        s0 = mx.mean(mx.abs(ww)) + 1e-8
-        d = ww.shape[0]
-        kk = mx.arange(K).astype(ww.dtype)
-        dist = mx.abs(ww[:, None] / s0 - g[None, :])
-        idx = mx.argmin(dist, axis=1)
-        base = -((kk[None, :] - idx[:, None].astype(ww.dtype)) ** 2)
-        noise = (mx.random.normal(shape=[d, K], key=key) if key is not None
-                 else mx.random.normal(shape=[d, K]))
-        return (noise + alpha * base / K).astype(mx.float32) * std
-    rng = rng or np.random.default_rng(0)
-    w = np.asarray(w)
-    d = w.shape[0]
-    K = len(grid)
-    s0 = np.abs(w).mean() + 1e-8
-    idx = np.argmin(np.abs(w[:, None] / s0 - grid[None, :]), axis=1)
-    logits = -((np.arange(K)[None, :] - idx[:, None]) ** 2).astype(np.float32)
-    noise = rng.standard_normal((d, K)).astype(np.float32)
-    return std * (noise + alpha * logits / K)
 
 
 # ---------------------------------------------------------------- ternary ---

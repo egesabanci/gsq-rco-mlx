@@ -5,10 +5,10 @@ Update (Chen et al.; paper App G betas (0.9, 0.95), wd 1.0):
     m <- beta2 * m + (1 - beta2) * g
     theta <- theta - lr * (u + wd * theta)
 
-Paper App G learning rates: 1e-4 for discrete-assignment logits,
-2e-5 for per-group scales (Qwen Q2_K setting; Llama uses 5e-5 —
-see block_train.LR_SCALES). Dual backend: numpy dicts (tests) and
-mx arrays (device training) via the same call.
+Paper App G learning rates (Tables 7-9): logits 1e-4 in every row. Group scales:
+5e-5 for the scalar 2/3-bit setting (Table 7, LR_SCALES, the default); 2e-5 for
+the GGUF Q2_K row of Table 9 (LR_SCALES_QWEN, kept for e2e.py until it switches).
+Dual backend: numpy dicts (tests) and mx arrays (device training) via the same call.
 """
 from __future__ import annotations
 import numpy as np
@@ -22,8 +22,8 @@ except Exception:
 
 # Paper App G / Tables 7-9.
 LR_LOGITS = 1e-4
-LR_SCALES_QWEN = 2e-5
-LR_SCALES_LLAMA = 5e-5
+LR_SCALES = 5e-5        # Table 7, scalar 2/3-bit (default for group scales)
+LR_SCALES_QWEN = 2e-5   # Table 9, Q2_K (GGUF K-quant) row; backward compatibility
 WEIGHT_DECAY = 1.0
 BETAS = (0.9, 0.95)
 

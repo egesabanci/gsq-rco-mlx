@@ -87,6 +87,23 @@ Phase 2 (not started): real Qwen weights/activations, tokenizer
 calibration tokens, frozen-prefix block loop, scale-only fine-tune,
 export to `mlx-lm`/GGUF.
 
+## Phase 2b — end-to-end GSQ on real Qwen2.5-0.5B (Oct 2026, ~70MB ceiling)
+
+* `scripts/quantize_qwen.py --mode real` streams the real checkpoint
+  layer-by-layer (lazy pread reads, never materialized; batch-1; bf16
+  fwd / fp32 Lion). Per-layer RCO bits (6x2b/13x3b/5x4b, avg 2.958),
+  group-64 RTN init + 20 Lion steps/linear (2 resamples; 2-bit full grid,
+  3/4-bit local-shift, qk→vo→mlp stage order), per-layer shards under
+  `results/.eval_cache/`.
+* Results: `results/gsq_eval.json` (FP ppl 25.54 → quant ppl 1418.36,
+  delta +1392.82, avg bits 2.958, allocation match) and
+  `results/qwen2.5-0.5b-gsq3bit.npz` (369MB, uint8 codes + fp16 scales +
+  manifest). Ablation: 3/4-bit layers only → ppl 44.25, so the six 2-bit
+  layers dominate at this smoke scale (8x256 cal + 4x256 held-out eval).
+* New module `src/gsq_mlx/e2e.py` (lazy safetensors reader, minimal Qwen2
+  mlx forward, per-linear Lion trainer, vocab-sharded NLL). See the
+  `honesty_note` in `gsq_eval.json` for scale caveats.
+
 ## Phase 1 — RCO for MLX (Oct 2026, synthetic-only, no model weights loaded)
 
 Same memory rule: nothing touches `models/Qwen2.5-0.5B/model.safetensors`.

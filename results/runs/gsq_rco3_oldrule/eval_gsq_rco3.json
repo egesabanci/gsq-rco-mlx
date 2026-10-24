@@ -1,0 +1,11 @@
+{
+ "ppl": 63.529580117425056,
+ "nll_per_token": 4.151505626055044,
+ "n_tokens": 298862,
+ "n_windows": 146,
+ "seq_len": 2048,
+ "model": "results/runs/gsq_rco3/mlx",
+ "seconds": 124.01330828666687,
+ "file_bytes": 425446936,
+ "peak_mlx_gb": 1.1779059916734695
+}

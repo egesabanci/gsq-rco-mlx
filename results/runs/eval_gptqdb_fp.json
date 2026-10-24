@@ -1,0 +1,13 @@
+{
+ "mode": "fp",
+ "ppl": 13.077237352038685,
+ "nll_per_token": 2.5708731121029,
+ "n_tokens": 298862,
+ "n_windows": 146,
+ "seq_len": 2048,
+ "n_layers": 24,
+ "decoded_avg_bits": null,
+ "decoded_int_cost": null,
+ "bpp_avg_incl_scales": null,
+ "seconds": 122.9680597782135
+}

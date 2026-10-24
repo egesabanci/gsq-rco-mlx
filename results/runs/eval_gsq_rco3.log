@@ -1,0 +1,44 @@
+[heavy.sh] waited 18s for the memory lock
+  ppl: 10/146 windows
+  ppl: 20/146 windows
+  ppl: 30/146 windows
+  ppl: 40/146 windows
+  ppl: 50/146 windows
+  ppl: 60/146 windows
+  ppl: 70/146 windows
+  ppl: 80/146 windows
+  ppl: 90/146 windows
+  ppl: 100/146 windows
+  ppl: 110/146 windows
+  ppl: 120/146 windows
+  ppl: 130/146 windows
+  ppl: 140/146 windows
+{
+ "ppl": 16.67155743874075,
+ "nll_per_token": 2.8137041200375297,
+ "n_tokens": 298862,
+ "n_windows": 146,
+ "seq_len": 2048,
+ "model": "results/runs/gsq_rco3/mlx",
+ "seconds": 127.15791082382202,
+ "file_bytes": 425446936,
+ "peak_mlx_gb": 1.1779059916734695
+}
+      128.09 real         2.72 user         5.21 sys
+           731365376  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               66882  page reclaims
+                 221  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                1259  voluntary context switches
+               46665  involuntary context switches
+         55642328735  instructions retired
+         25559901311  cycles elapsed
+          1727170216  peak memory footprint

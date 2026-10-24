@@ -1,0 +1,36 @@
+[heavy.sh] waited 236s for the memory lock
+[evaluate] uniform-4: 146 WikiText-2 test windows x 2048 tokens, setup 0.9s
+  ppl: 10/146 windows
+  ppl: 20/146 windows
+  ppl: 30/146 windows
+  ppl: 40/146 windows
+  ppl: 50/146 windows
+  ppl: 60/146 windows
+  ppl: 70/146 windows
+  ppl: 80/146 windows
+  ppl: 90/146 windows
+  ppl: 100/146 windows
+  ppl: 110/146 windows
+  ppl: 120/146 windows
+  ppl: 130/146 windows
+  ppl: 140/146 windows
+[evaluate] RESULT uniform-4 ppl=14.4111 nll/token=2.667997 n_tokens=298862
+[evaluate] wrote results/runs/eval_gptqdb_u4.json
+      362.25 real         4.03 user         6.25 sys
+          1530855424  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               98497  page reclaims
+                  48  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                4351  voluntary context switches
+               61211  involuntary context switches
+         47790298173  instructions retired
+         23848157798  cycles elapsed
+          2501642184  peak memory footprint

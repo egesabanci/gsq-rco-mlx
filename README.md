@@ -92,7 +92,7 @@ improvement. The pre-audit record is in [RESULTS section 7](docs/RESULTS.md#7-be
 | 2 | The sensitivity forward expanded GQA heads incorrectly and was non-causal | Fixed: module removed; forward checked against mlx-lm | `484c33f`, `05fe395` |
 | 3 | GSQ training could not change assignments, only add init noise | Fixed: GPTQ start and staged training; median 4% of codes change at 2 to 4 bits | `3d3c483`, `b0f4617` |
 | 4 | The pipeline applied every quantized block twice | Fixed: single-pass streams | `3d3c483` |
-| 5 | The failure analysis ("model too small") was contradicted by the RTN results | Fixed: report replaced by [RESULTS](docs/RESULTS.md) | this change |
+| 5 | The failure analysis ("model too small") was contradicted by the RTN results | Fixed: report replaced by [RESULTS](docs/RESULTS.md) | `62506a6` |
 | 6 | No within-block staging | Fixed: `qk`, `vo`, `mlp` with the paper's losses | `3d3c483` |
 | 7 | No GPTQ warm start | Fixed: GPTQ with signed scales | `b0f4617` |
 | 8 | The allocation was scored with a different quantizer than the one deployed | Fixed: database built with the deployment quantizer | `484c33f` |
@@ -108,7 +108,7 @@ improvement. The pre-audit record is in [RESULTS section 7](docs/RESULTS.md#7-be
 | 18 | RCO settings: 24 groups, 4 options, T = 10, g = 4 | Fixed: 168 linears, 6 options, T = 100, g = 8 | `484c33f`, `ec8433d` |
 | 19 | Resume and cache hazards | Fixed: resume replays the prefix; fingerprints; database identity | `3d3c483`, `484c33f`, `c6f55b1`, `b9e3305` |
 | 20 | Weak tests: a test passed with lr = 0; a smoke test had no assertions | Fixed: assertions, forward reference test, pytest suite | `b0f4617`, `05fe395`, `b9e3305` |
-| 21 | Docs claimed MSE/KL sensitivities and a reproduce command that ran a stub | Fixed: README, CLI and architecture rewritten | `b9e3305`, this change |
+| 21 | Docs claimed MSE/KL sensitivities and a reproduce command that ran a stub | Fixed: README, CLI and architecture rewritten | `b9e3305`, `62506a6` |
 | 22 | Two inconsistent init functions | Fixed: one App-A init | `b0f4617` |
 | 23 | Retraction did not check its bracket | Fixed: bracketed retraction that raises | `97181da` |
 | A | Found while fixing: 8-bit linears crashed the stage optimiser at layer 3 | Fixed: 8-bit linears are GPTQ-only | `8df492a` |

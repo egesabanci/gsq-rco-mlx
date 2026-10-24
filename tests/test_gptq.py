@@ -22,7 +22,6 @@ from gsq_rco.gsq.gptq import (_tri_inv_lower, dequantize, hessian_from_inputs,
                           quantize_gptq, quantize_rtn)
 from gsq_rco.gsq.quant import get_grid
 import mlx.core as mx
-from tokenizers import Tokenizer
 from gsq_rco.gsq.e2e import BKEY, WKEY, LazyWeights, Qwen2Stream
 
 
@@ -86,18 +85,12 @@ def test_gptq():
 
     GS = 128  # paper Tables 7/9 group size; 896 and 4864 are multiples of 128
 
-    N_SEQ, SEQ_LEN, LAYER = 5, 256, 5  # seqs 0-3 calibrate H, seq 4 is held out
-
-    tok = Tokenizer.from_file(os.path.join(MODEL_DIR, "tokenizer.json"))
-
-    with open(os.path.join(ROOT, "gsq.txt"), "rb") as f:
-        text = f.read().replace(b"\x00", b"").decode("utf-8", errors="replace")
-
-    ids = tok.encode(text).ids
-
-    assert len(ids) >= N_SEQ * SEQ_LEN, "gsq.txt too short for the calibration tokens"
-
-    seqs = [ids[k * SEQ_LEN:(k + 1) * SEQ_LEN] for k in range(N_SEQ)]
+    # Random WikiText-2 train windows, as the pipeline calibrates: 64 calibrate H (64 x 255 rows > 4864
+    # down_proj inputs) and 4 are held out. With 4 contiguous calibration seqs and one held-out seq the
+    # 2-bit down_proj GPTQ overfit and lost to RTN on the held-out text.
+    N_CAL, N_HOLD, SEQ_LEN, LAYER = 64, 4, 256, 5
+    from gsq_rco.common.data import calibration_windows
+    seqs = [list(w) for w in calibration_windows(N_CAL + N_HOLD, SEQ_LEN, seed=0, split="train")]
 
     lw = LazyWeights(os.path.join(MODEL_DIR, "model.safetensors"))
 
@@ -139,10 +132,10 @@ def test_gptq():
         Wl = weights.pop(name)
         Xs = cap.pop(name)
         H_real, n_real = None, 0
-        for X in Xs[:4]:
+        for X in Xs[:N_CAL]:
             H_real, n_real = hessian_from_inputs(X, H_real, n_real)
-        Xcal = np.concatenate(Xs[:4], axis=0)
-        Xhold = Xs[4]
+        Xcal = np.concatenate(Xs[:N_CAL], axis=0)
+        Xhold = np.concatenate(Xs[N_CAL:], axis=0)
         del Xs
         ref_cal = float(((Xcal @ Wl.T) ** 2).sum() / Xcal.shape[0])
         ref_hold = float(((Xhold @ Wl.T) ** 2).sum() / Xhold.shape[0])

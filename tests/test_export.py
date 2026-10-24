@@ -15,7 +15,7 @@
       same dense weights. Stages hand results over through small files. Every quantized
       module must be a QuantizedLinear with its bits; each linear's output must match the
       dense weights bf16(s) * grid[code]; logits (32 tokens) and NLL (4 x 256 tokens of
-      rco.txt) must agree with the dense model. Each stage's peak RSS (kernel rusage) must
+      WikiText-2 test) must agree with the dense model. Each stage's peak RSS (kernel rusage) must
       stay under the 1.5 GB budget.
 
 Usage: .venv/bin/python tests/test_export.py     (exit nonzero on any failure)
@@ -51,7 +51,6 @@ from gsq_rco.gsq.gptq import quantize_rtn
 from gsq_rco.gsq.quant import get_grid
 
 BASE = os.path.join(ROOT, "models", "Qwen2.5-0.5B")  # bf16 checkpoint
-TOKENIZER_JSON = os.path.join(ROOT, "models", "Qwen2.5-0.5B", "tokenizer.json")
 GROUP = 64
 LAYER_BITS = (2, 3, 4, 8)  # full-model check: layer i gets LAYER_BITS[i % 4]
 BOS = 151643  # same windows as gsq.pipeline.build_seqs
@@ -257,11 +256,8 @@ def check_cli(tmp: str) -> None:
 
 
 def eval_data():
-    from tokenizers import Tokenizer
-    tok = Tokenizer.from_file(TOKENIZER_JSON)
-    with open(os.path.join(ROOT, "rco.txt")) as f:
-        ids = tok.encode(f.read()).ids
-    assert len(ids) >= 4 * 255, "rco.txt too short for 4 x 256 windows"
+    from gsq_rco.common.data import tokenize_split
+    ids = tokenize_split("test").tolist()  # WikiText-2 test, contiguous from the start
     windows = [np.array([BOS] + ids[i * 255:(i + 1) * 255], dtype=np.int64) for i in range(4)]
     short = np.array([BOS] + ids[:31], dtype=np.int64)
     return short, windows

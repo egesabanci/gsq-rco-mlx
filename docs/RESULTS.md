@@ -78,7 +78,7 @@ Source: `results/rco_allocation.json`. Figures: [`figures/rco_allocation.png`](f
   is a multiple of 114,688). The budget is 9,360 units. The continuous expected cost stays at 9,360 in every
   step (`max_abs_budget_gap` 9.7e-9, tolerance 1e-4).
 - **Decoded assignment.** 9,110 units, which is **2.92 code bits** (3.17 incl. scales). The final decode is
-  DP on log p with no noise (rco.txt Alg. 1). It need not spend the whole budget, so the decoded average is
+  DP on log p with no noise (RCO paper, Alg. 1). It need not spend the whole budget, so the decoded average is
   0.08 bits under the target.
 - **Histogram** (`per_linear_bits`, 168 linears): 2 bits: 35; 3 bits: 77; 4 bits: 30; 5 bits: 11; 6 bits:
   12; 8 bits: 3 (`3.k_proj`, `6.v_proj`, `7.v_proj`).
@@ -149,11 +149,11 @@ Reading the table:
 Against the papers, qualitatively:
 
 - The RCO paper reports RCO ahead of per-layer baselines that use a linear surrogate solved by DP (dynamic
-  HIGGS) at fixed budgets (rco.txt, Table 2; those results are on other models). Here the proxy-DP allocation
+  HIGGS) at fixed budgets (RCO paper, Table 2; those results are on other models). Here the proxy-DP allocation
   scores 46.08 at 3.00 bits and the KL-trained RCO allocation scores 18.26 at 2.92 bits. The ordering agrees
   with the paper on this model. It is one model and one seed, and the two allocations differ by 0.08 bits.
 - The GSQ paper reports its results at a much larger scale than was run here. Its Llama runs use 20 epochs
-  over 4,096 sequences of 4,096 tokens, batch size 64, and group size 128 (gsq.txt, Table 7). That is about
+  over 4,096 sequences of 4,096 tokens, batch size 64, and group size 128 (GSQ paper, Table 7). That is about
   1,280 optimizer steps per block. This implementation uses 128 sequences of 512 tokens, 200 steps per stage,
   group size 64 and micro-batch 2. The numbers are not comparable with the paper's tables.
 
@@ -197,8 +197,8 @@ file is deleted in this change. Its content is available with `git show 3aa06d8:
 
 | Quantity | Value | Notes |
 |---|---:|---|
-| bf16 perplexity | 25.54 | custom eval: four 256-token windows of `rco.txt` (1,020 scored tokens) |
-| Quantized perplexity | 1418.36 | 8 x 256-token calibration from `gsq.txt`; 20 Lion steps per linear |
+| bf16 perplexity | 25.54 | custom eval: four 256-token windows of the RCO paper's text (1,020 scored tokens) |
+| Quantized perplexity | 1418.36 | 8 x 256-token calibration from the GSQ paper's text; 20 Lion steps per linear |
 | Ablation: six 2-bit layers kept bf16 | 44.25 | same file (`ablation_34bit_only_ppl`) |
 
 These numbers are not comparable with the table in section 1. They use a different evaluation text, a different

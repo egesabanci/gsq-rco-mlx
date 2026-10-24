@@ -8,3 +8,6 @@ data/
 results/.cal_cache/
 results/.eval_cache/
 results/*.npz
+results/.rco_db/
+results/.gsq_cache/
+results/runs/

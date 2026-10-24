@@ -7,6 +7,8 @@ weight takes. **RCO** (Riemannian constrained optimization; Helcig and Alistarh,
 budget. See [Papers](#papers) for what each paper contributes and [Citation](#citation) to cite them. Both run on
 Qwen2.5-0.5B on a 16 GiB M3, end to end, in about 2 h 36 min for one configuration.
 
+Write-up: [Learned 3-Bit Codes on a Budget-Exact Allocation: GSQ and RCO on Apple Silicon](https://konic.io/research/gsq-rco-mixed-precision-mlx).
+
 The first version of this port was wrong. Its own evaluation gave perplexity 1418 for the quantized model, against
 25.54 for the bf16 model. A 2026-10-24 audit found the causes, and the fixes are merged into `main`. The [audit section](#the-audit) lists all 23 findings with their fix commits.
 
@@ -74,7 +76,7 @@ quantized block twice. It also found that the allocation used a per-layer proxy 
 GSQ training could not change most codes, and that the sensitivity forward expanded grouped-query attention
 incorrectly. The rest of the findings are in the table. Code comments use the same numbering.
 
-| | Before (`3aa06d8`) | After (this branch) |
+| | Before (`3aa06d8`) | After (`main`) |
 |---|---|---|
 | Evaluation text | text of the RCO paper, four 256-token windows (custom) | WikiText-2 test, 146 windows of 2,048 tokens |
 | bf16 perplexity | 25.54 | 13.08 |

@@ -6,9 +6,9 @@ numbers are in [RESULTS.md](RESULTS.md).
 
 The two papers are the references for the code. Their text extractions are tracked at the repository root:
 
-- **GSQ**, [`gsq.txt`](../gsq.txt): Dadgarnia et al., "GSQ: Highly-Accurate Low-Precision Scalar Quantization
+- **GSQ**, [`papers/gsq.pdf`](../papers/gsq.pdf): Dadgarnia et al., "GSQ: Highly-Accurate Low-Precision Scalar Quantization
   for LLMs via Gumbel-Softmax Sampling".
-- **RCO**, [`rco.txt`](../rco.txt): Helcig and Alistarh, "Model Compression with Exact Budget Constraints via
+- **RCO**, [`papers/rco.pdf`](../papers/rco.pdf): Helcig and Alistarh, "Model Compression with Exact Budget Constraints via
   Riemannian Manifolds".
 
 ## Package map
@@ -100,7 +100,7 @@ allocation and the calibration stream, and writes its own shards.
 
 ## Paper-to-code map
 
-### GSQ (`gsq.txt`)
+### GSQ ([paper](../papers/gsq.pdf))
 
 | Paper | Content | Code |
 |---|---|---|
@@ -126,7 +126,7 @@ Within a stage, each linear gets a GPTQ warm start. Its Hessian comes from its r
 earlier stages hardened, and the earlier linears of this stage at their GPTQ values. Then the logits and scales
 are trained with Lion and hardened to argmax codes. Scales are rounded to fp16, which is the stored form.
 
-### RCO (`rco.txt`)
+### RCO ([paper](../papers/rco.pdf))
 
 | Paper | Content | Code |
 |---|---|---|
@@ -142,7 +142,7 @@ are trained with Lion and hardened to argmax codes. Scales are rounded to fp16, 
 | App. B.1 | DP knapsack and the O(N log N) top-k path for two options | `rco/manifold.py`: `dp_knapsack`, `topk_2option` |
 | Alg. 1, final | Final assignment is DP on `log p` with no noise | `rco/loop.py`: `rco_loop` (`z_final`); `rco/allocate.py`: `rco_allocate`, `decoded_cost` |
 
-Recommended settings (rco.txt, Table 24) and the values used here:
+Recommended settings (RCO paper, Table 24) and the values used here:
 
 | Setting | Table 24 | Used | Note |
 |---|---|---|---|
